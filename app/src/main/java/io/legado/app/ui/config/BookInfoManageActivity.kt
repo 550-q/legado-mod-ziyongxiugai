@@ -8,8 +8,10 @@ import androidx.compose.ui.platform.ViewCompositionStrategy
 import io.legado.app.R
 import io.legado.app.base.BaseActivity
 import io.legado.app.databinding.ActivityThemeManageBinding
+import io.legado.app.help.config.BookInfoCatalogOpenMode
 import io.legado.app.help.config.BookInfoComponentConfig
 import io.legado.app.help.config.BookInfoComponentItem
+import io.legado.app.help.config.BookInfoComponentType
 import io.legado.app.help.config.BookInfoPageStyle
 import io.legado.app.utils.toastOnUi
 import io.legado.app.utils.viewbindingdelegate.viewBinding
@@ -20,6 +22,7 @@ class BookInfoManageActivity : BaseActivity<ActivityThemeManageBinding>() {
 
     private val styleState = mutableStateOf(BookInfoPageStyle.CLASSIC)
     private val componentsState = mutableStateOf<List<BookInfoComponentItem>>(emptyList())
+    private val catalogModeState = mutableStateOf(BookInfoCatalogOpenMode.BUTTON)
 
     override fun onActivityCreated(savedInstanceState: Bundle?) {
         binding.titleBar.title = getString(R.string.book_info_manage)
@@ -27,6 +30,7 @@ class BookInfoManageActivity : BaseActivity<ActivityThemeManageBinding>() {
         // Load initial state
         styleState.value = BookInfoComponentConfig.loadStyle()
         componentsState.value = BookInfoComponentConfig.load()
+        catalogModeState.value = BookInfoComponentConfig.loadCatalogOpenMode()
 
         // Hide legacy XML views (tab_bar, tv_summary, btn_add)
         binding.tabBar.visibility = android.view.View.GONE
@@ -51,8 +55,10 @@ class BookInfoManageActivity : BaseActivity<ActivityThemeManageBinding>() {
                 BookInfoManageScreen(
                     style = styleState.value,
                     components = componentsState.value,
+                    catalogOpenMode = catalogModeState.value,
                     onStyleChanged = ::onStyleChanged,
                     onComponentToggle = ::onComponentToggle,
+                    onCatalogOpenModeChanged = ::onCatalogOpenModeChanged,
                     onReset = ::onReset,
                     onMoveItem = ::onMoveItem
                 )
@@ -78,16 +84,24 @@ class BookInfoManageActivity : BaseActivity<ActivityThemeManageBinding>() {
         BookInfoComponentConfig.save(current)
     }
 
+    private fun onCatalogOpenModeChanged(mode: BookInfoCatalogOpenMode) {
+        if (catalogModeState.value == mode) return
+        BookInfoComponentConfig.saveCatalogOpenMode(mode)
+        catalogModeState.value = mode
+    }
+
     private fun onReset() {
         BookInfoComponentConfig.reset()
         componentsState.value = BookInfoComponentConfig.load()
     }
 
-    private fun onMoveItem(fromIndex: Int, toIndex: Int) {
+    private fun onMoveItem(type: BookInfoComponentType, targetIndex: Int) {
         val current = componentsState.value.toMutableList()
-        if (fromIndex !in current.indices || toIndex !in current.indices) return
-        val item = current.removeAt(fromIndex)
-        current.add(toIndex, item)
+        val from = current.indexOfFirst { it.type == type }
+        if (from < 0 || from == targetIndex) return
+        val moved = current.removeAt(from)
+        val insert = targetIndex.coerceIn(0, current.size)
+        current.add(insert, moved)
         componentsState.value = current
         BookInfoComponentConfig.save(current)
     }

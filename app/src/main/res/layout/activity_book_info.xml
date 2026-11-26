@@ -558,12 +558,19 @@
                             android:textColorHint="@color/tv_text_summary"
                             android:textSize="13.5sp" />
 
-                        <androidx.recyclerview.widget.RecyclerView
-                            android:id="@+id/rv_catalog"
+                        <FrameLayout
                             android:layout_width="match_parent"
                             android:layout_height="0dp"
                             android:layout_marginTop="8dp"
-                            android:layout_weight="1" />
+                            android:layout_weight="1"
+                            android:clipChildren="false">
+
+                            <io.legado.app.ui.widget.recycler.scroller.FastScrollRecyclerView
+                                android:id="@+id/rv_catalog"
+                                android:layout_width="match_parent"
+                                android:layout_height="match_parent" />
+
+                        </FrameLayout>
 
                     </LinearLayout>
                 </LinearLayout>

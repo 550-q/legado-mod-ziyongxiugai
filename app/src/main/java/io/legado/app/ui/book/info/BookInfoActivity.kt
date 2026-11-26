@@ -1,9 +1,11 @@
 package io.legado.app.ui.book.info
 
 import android.annotation.SuppressLint
+import android.app.Dialog
 import android.content.Intent
 import android.graphics.Bitmap
 import android.graphics.Color
+import android.graphics.drawable.ColorDrawable
 import android.net.Uri
 import android.os.Build
 import android.os.Bundle
@@ -15,6 +17,7 @@ import android.view.MotionEvent
 import android.view.View
 import android.view.ViewGroup
 import android.view.ViewConfiguration
+import android.view.WindowManager
 import android.view.textclassifier.TextClassifier
 import android.webkit.WebResourceRequest
 import android.webkit.WebView
@@ -36,6 +39,8 @@ import androidx.activity.result.contract.ActivityResultContracts
 import androidx.activity.viewModels
 import androidx.constraintlayout.widget.ConstraintLayout
 import androidx.core.content.ContextCompat
+import androidx.core.view.ViewCompat
+import androidx.core.view.WindowInsetsCompat
 import androidx.core.view.doOnLayout
 import androidx.core.view.isVisible
 import androidx.core.view.updateLayoutParams
@@ -78,6 +83,7 @@ import io.legado.app.help.book.isVideo
 import io.legado.app.help.book.isWebFile
 import io.legado.app.help.book.removeType
 import io.legado.app.help.config.AppConfig
+import io.legado.app.help.config.BookInfoCatalogOpenMode
 import io.legado.app.help.config.BookInfoComponentConfig
 import io.legado.app.help.config.BookInfoComponentItem
 import io.legado.app.help.config.BookInfoComponentType
@@ -124,6 +130,7 @@ import io.legado.app.ui.book.manga.ReadMangaActivity
 import io.legado.app.ui.book.read.ReadBookActivity
 import io.legado.app.ui.book.read.ReadBookActivity.Companion.RESULT_DELETED
 import io.legado.app.ui.book.search.SearchActivity
+import io.legado.app.model.ReadBook
 import io.legado.app.model.SourceCallBack
 import io.legado.app.ui.association.OnLineImportActivity
 import io.legado.app.ui.book.source.edit.BookSourceEditActivity
@@ -200,12 +207,15 @@ class BookInfoActivity :
     private data class BookInfoPage(
         val kind: BookInfoPageKind,
         val items: List<BookInfoPageItem>,
-        val rightItems: List<BookInfoPageItem> = emptyList()
+        val rightItems: List<BookInfoPageItem> = emptyList(),
+        val scrollable: Boolean = false
     )
 
     private val tocActivityResult = registerForActivityResult(TocActivityResult()) {
         it?.let {
             viewModel.getBook(false)?.let { book ->
+                // 详情页目录跳转前记录当前阅读位置
+                rememberReadPositionBeforeChapterJump(book)
                 lifecycleScope.launch {
                     withContext(IO) {
                         val durChapterIndex = it[0] as Int
@@ -279,6 +289,7 @@ class BookInfoActivity :
     private var introRawText: CharSequence = ""
     private var detailIntroOnly = false
     private var bookInfoComponentsReady = false
+    private var catalogPageIndex = -1
     private var lastBookInfoBgPath: String? = null
     private var useComposeBookInfo = false
     private var composeReadTimeText = ""
@@ -1057,7 +1068,18 @@ class BookInfoActivity :
         )
         val orderedComponents: List<BookInfoComponentItem> = BookInfoComponentConfig.load()
             .filter { item -> item.enabled && componentViews.containsKey(item.type) }
-        setDetailIntroOnly(orderedComponents.any { it.type == BookInfoComponentType.CATALOG })
+        val catalogEnabled = orderedComponents.any { it.type == BookInfoComponentType.CATALOG }
+        setDetailIntroOnly(catalogEnabled)
+        val catalogButtonEntry = catalogEnabled &&
+            BookInfoComponentConfig.loadCatalogOpenMode() == BookInfoCatalogOpenMode.BUTTON
+        llToc.visibility = if (catalogButtonEntry) View.VISIBLE else View.GONE
+        dividerToc.visibility = llToc.visibility
+        // 按钮打开时目录不再占一页，改由目录窗口显示
+        val pageComponents = if (catalogButtonEntry) {
+            orderedComponents.filterNot { it.type == BookInfoComponentType.CATALOG }
+        } else {
+            orderedComponents
+        }
         if (!::bookInfoPager.isInitialized || bookInfoPager.width <= 0 || bookInfoPager.height <= 0) {
             if (::bookInfoPager.isInitialized) {
                 bookInfoPager.doOnLayout { applyBookInfoComponents() }
@@ -1065,12 +1087,22 @@ class BookInfoActivity :
             return@run
         }
         restoreBookInfoComponentBackgrounds()
-        val pages = if (isBookInfoLandscape()) {
-            buildLandscapeBookInfoPages(orderedComponents, componentViews)
+        val pages = if (catalogButtonEntry) {
+            binding.flAction.visibility = View.VISIBLE
+            buildSingleScrollPage(pageComponents, componentViews)
+        } else if (isBookInfoLandscape()) {
+            buildLandscapeBookInfoPages(pageComponents, componentViews)
         } else {
-            buildBookInfoPages(orderedComponents, componentViews)
+            buildBookInfoPages(pageComponents, componentViews)
+        }
+        catalogPageIndex = pages.indexOfFirst { page ->
+            page.items.any { it.type == BookInfoComponentType.CATALOG }
         }
         val changed = bookInfoPageAdapter.submitPages(pages)
+        if (::bookInfoPager.isInitialized) {
+            bookInfoPager.isUserInputEnabled = !catalogButtonEntry
+        }
+        binding.refreshLayout.isEnabled = !catalogButtonEntry
         if (!bookInfoComponentsReady) {
             bookInfoComponentsReady = true
         }
@@ -1084,9 +1116,15 @@ class BookInfoActivity :
     private fun initBookInfoPager(): Unit = binding.run {
         configurePagedRefreshLayout()
         ensureCoverInsideHeader()
-        listOf(llDetailPanel, llInfoPage, llDetailContentPanel, llCatalogPanel, aiImagesPanel, flAction).forEach {
-            (it.parent as? ViewGroup)?.removeView(it)
+        val keepActionPinned =
+            BookInfoComponentConfig.loadCatalogOpenMode() == BookInfoCatalogOpenMode.BUTTON
+        val movableViews = mutableListOf<View>(
+            llDetailPanel, llInfoPage, llDetailContentPanel, llCatalogPanel, aiImagesPanel
+        )
+        if (!keepActionPinned) {
+            movableViews += flAction
         }
+        movableViews.forEach { (it.parent as? ViewGroup)?.removeView(it) }
         llInfo.removeAllViews()
         llInfo.orientation = LinearLayout.VERTICAL
         llInfo.setPadding(0, 0, 0, 0)
@@ -1200,6 +1238,64 @@ class BookInfoActivity :
         tvAuthor.maxLines = 1
         tvLasted.maxLines = 1
         tvReadTime.maxLines = 1
+    }
+
+    /**
+     * 单页模式：按顺序把组件堆在一页里纵向滚动（目录改用弹窗打开时使用）
+     */
+    private fun buildSingleScrollPage(
+        components: List<BookInfoComponentItem>,
+        componentViews: Map<BookInfoComponentType, View?>
+    ): List<BookInfoPage> {
+        val pageHeight = bookInfoPageContentHeight()
+        val pageWidth = bookInfoPageContentWidth()
+        if (pageHeight <= 0 || pageWidth <= 0) return emptyList()
+        val gap = 14.dpToPx()
+        val items = mutableListOf<BookInfoPageItem>()
+        components.forEach { item ->
+            val view = componentViews[item.type] ?: return@forEach
+            view.visibility = View.VISIBLE
+            val naturalHeight = measureBookInfoComponent(view, pageWidth, 0)
+            val height = if (item.type == BookInfoComponentType.DETAIL) {
+                singlePageDetailHeight(pageWidth, pageHeight)
+            } else {
+                naturalHeight
+            }
+            items += BookInfoPageItem(
+                item.type,
+                view,
+                height,
+                if (items.isEmpty()) 0 else gap
+            )
+        }
+        // 底部固定的操作栏会挡住内容，留出同等高度的空白
+        val actionHeight = measureBookInfoComponent(binding.flAction, pageWidth, 0)
+        if (actionHeight > 0) {
+            items += BookInfoPageItem(BookInfoComponentType.ACTIONS, Space(this), actionHeight, 0)
+        }
+        if (items.isEmpty()) return emptyList()
+        return listOf(BookInfoPage(BookInfoPageKind.NORMAL_COMPONENTS, items, scrollable = true))
+    }
+
+    /**
+     * 单页模式下简介卡片的高度：按简介内容算，最高不超过一屏的七成，避免大片空白
+     */
+    private fun singlePageDetailHeight(pageWidth: Int, pageHeight: Int): Int {
+        val container = binding.tvIntroContainer
+        val child = if (container.childCount > 0) container.getChildAt(0) else null
+        val contentHeight = if (child != null) {
+            val availableWidth = (pageWidth - 28.dpToPx()).coerceAtLeast(1)
+            child.measure(
+                View.MeasureSpec.makeMeasureSpec(availableWidth, View.MeasureSpec.EXACTLY),
+                View.MeasureSpec.makeMeasureSpec(0, View.MeasureSpec.UNSPECIFIED)
+            )
+            child.measuredHeight
+        } else {
+            0
+        }
+        val minHeight = 240.dpToPx()
+        val maxHeight = (pageHeight * 0.7f).toInt().coerceAtLeast(minHeight)
+        return (contentHeight + 24.dpToPx() + 10.dpToPx()).coerceIn(minHeight, maxHeight)
     }
 
     private fun buildBookInfoPages(
@@ -1462,6 +1558,7 @@ class BookInfoActivity :
             val oldPage = this[index]
             val newPage = other[index]
             oldPage.kind == newPage.kind &&
+                oldPage.scrollable == newPage.scrollable &&
                 oldPage.items.sameBookInfoItems(newPage.items) &&
                 oldPage.rightItems.sameBookInfoItems(newPage.rightItems)
         }
@@ -1481,16 +1578,21 @@ class BookInfoActivity :
 
     private fun childScrollTouchListener(): View.OnTouchListener {
         val touchSlop = ViewConfiguration.get(this).scaledTouchSlop
+        val pagerSwipeThreshold = 90.dpToPx()
         var downX = 0f
         var downY = 0f
         var direction = 0
+        var startItem = -1
         return View.OnTouchListener { view, event ->
             when (event.actionMasked) {
                 MotionEvent.ACTION_DOWN -> {
                     downX = event.x
                     downY = event.y
                     direction = 0
-                    requestBookInfoPagerDisallowIntercept(true)
+                    startItem = if (::bookInfoPager.isInitialized) bookInfoPager.currentItem else -1
+                    // 只拦住外层下拉/滚动，别拦住 ViewPager2，否则横向翻页会被子列表吞掉
+                    requestOuterScrollDisallowIntercept(true)
+                    requestBookInfoPagerOnlyDisallowIntercept(false)
                 }
                 MotionEvent.ACTION_MOVE -> {
                     val dx = kotlin.math.abs(event.x - downX)
@@ -1502,11 +1604,33 @@ class BookInfoActivity :
                             else -> 0
                         }
                     }
-                    requestBookInfoPagerDisallowIntercept(direction != 1)
+                    val vertical = direction == 2
+                    requestOuterScrollDisallowIntercept(vertical)
+                    requestBookInfoPagerOnlyDisallowIntercept(vertical)
                 }
-                MotionEvent.ACTION_UP,
+                MotionEvent.ACTION_UP -> {
+                    // 列表有时会把快速横滑吞掉，翻页兜底：横滑够长且本页没翻时手动翻一页
+                    val dx = event.x - downX
+                    val dy = event.y - downY
+                    val horizontalSwipe = kotlin.math.abs(dx) > pagerSwipeThreshold &&
+                        kotlin.math.abs(dx) > kotlin.math.abs(dy) * 1.2f
+                    if (horizontalSwipe && ::bookInfoPager.isInitialized &&
+                        bookInfoPager.isUserInputEnabled &&
+                        bookInfoPager.currentItem == startItem
+                    ) {
+                        val target = startItem + if (dx < 0) 1 else -1
+                        val lastIndex = bookInfoPageAdapter.itemCount - 1
+                        if (target in 0..lastIndex) {
+                            bookInfoPager.setCurrentItem(target, true)
+                        }
+                    }
+                    direction = 0
+                    startItem = -1
+                    requestBookInfoPagerDisallowIntercept(false)
+                }
                 MotionEvent.ACTION_CANCEL -> {
                     direction = 0
+                    startItem = -1
                     requestBookInfoPagerDisallowIntercept(false)
                 }
             }
@@ -1538,11 +1662,19 @@ class BookInfoActivity :
     }
 
     private fun requestBookInfoPagerDisallowIntercept(disallow: Boolean) {
+        requestOuterScrollDisallowIntercept(disallow)
+        requestBookInfoPagerOnlyDisallowIntercept(disallow)
+    }
+
+    private fun requestOuterScrollDisallowIntercept(disallow: Boolean) {
         binding.scrollView.requestDisallowInterceptTouchEvent(disallow)
+        binding.refreshLayout.requestDisallowInterceptTouchEvent(disallow)
+    }
+
+    private fun requestBookInfoPagerOnlyDisallowIntercept(disallow: Boolean) {
         if (::bookInfoPager.isInitialized) {
             bookInfoPager.requestDisallowInterceptTouchEvent(disallow)
         }
-        binding.refreshLayout.requestDisallowInterceptTouchEvent(disallow)
     }
     override fun onCompatCreateOptionsMenu(menu: Menu): Boolean {
         menuInflater.inflate(R.menu.book_info, menu)
@@ -2079,10 +2211,7 @@ class BookInfoActivity :
         upReadTime(book.name)
         showBookIntro(book)
         if (book.isWebFile) {
-            llToc.gone()
             tvLasted.text = getString(R.string.lasted_show, getString(R.string.downloading))
-        } else {
-            llToc.gone()
         }
         menuCustomBtn?.isVisible = viewModel.hasCustomBtn
         upTvBookshelf()
@@ -2908,6 +3037,51 @@ class BookInfoActivity :
                 container.removeAllViews()
                 container.background = null
                 val horizontalPadding = bookInfoPageHorizontalPadding()
+                if (page.scrollable) {
+                    // 单页模式：所有组件在一页里纵向滚动
+                    container.orientation = LinearLayout.VERTICAL
+                    container.setPadding(0, 0, 0, 0)
+                    val scroll = NestedScrollView(container.context).apply {
+                        isFillViewport = false
+                        overScrollMode = View.OVER_SCROLL_NEVER
+                        setOnTouchListener { v, event ->
+                            // 拦下外层的下拉刷新/滚动，交给这一页自己滚
+                            when (event.actionMasked) {
+                                MotionEvent.ACTION_DOWN ->
+                                    v.parent?.requestDisallowInterceptTouchEvent(true)
+                                MotionEvent.ACTION_UP,
+                                MotionEvent.ACTION_CANCEL ->
+                                    v.parent?.requestDisallowInterceptTouchEvent(false)
+                            }
+                            false
+                        }
+                    }
+                    val content = LinearLayout(container.context).apply {
+                        orientation = LinearLayout.VERTICAL
+                        setPadding(
+                            horizontalPadding,
+                            bookInfoPageTopPadding(),
+                            horizontalPadding,
+                            bookInfoPageBottomPadding()
+                        )
+                    }
+                    scroll.addView(
+                        content,
+                        ViewGroup.LayoutParams(
+                            ViewGroup.LayoutParams.MATCH_PARENT,
+                            ViewGroup.LayoutParams.WRAP_CONTENT
+                        )
+                    )
+                    container.addView(
+                        scroll,
+                        LinearLayout.LayoutParams(
+                            LinearLayout.LayoutParams.MATCH_PARENT,
+                            LinearLayout.LayoutParams.MATCH_PARENT
+                        )
+                    )
+                    bindColumn(content, page.items)
+                    return
+                }
                 container.setPadding(
                     horizontalPadding,
                     bookInfoPageTopPadding(),
@@ -3130,7 +3304,7 @@ class BookInfoActivity :
             }
         }
         tvIntroToggle.gone()
-        tvTocView.setOnClickListener { openChapterListSafely() }
+        tvTocView.setOnClickListener { openCatalogEntry() }
         tvChangeGroup.setOnClickListener {
             viewModel.getBook()?.let {
                 showDialogFragment(
@@ -3332,6 +3506,99 @@ class BookInfoActivity :
         }
     }
 
+    private var catalogDialog: Dialog? = null
+
+    private fun showCatalogDialog() {
+        if (catalogDialog?.isShowing == true) return
+        val panel = binding.llCatalogPanel
+        (panel.parent as? ViewGroup)?.removeView(panel)
+        // 左右边距沿用原弹窗：AppCompat 弹窗背景自带 16dp inset
+        val sidePadding = 16.dpToPx()
+        var dialog: Dialog? = null
+        val wrapper = object : FrameLayout(this) {
+            override fun onTouchEvent(event: MotionEvent): Boolean {
+                // 面板以外（左右边距、状态栏/导航栏留白）点击关闭，保持原来弹窗的手感
+                if (event.actionMasked == MotionEvent.ACTION_DOWN) {
+                    val outside = event.x < paddingLeft ||
+                            event.x >= width - paddingRight ||
+                            event.y < paddingTop ||
+                            event.y >= height - paddingBottom
+                    if (outside) {
+                        dialog?.dismiss()
+                        return true
+                    }
+                }
+                return super.onTouchEvent(event)
+            }
+        }.apply {
+            setPadding(sidePadding, 0, sidePadding, 0)
+        }
+        wrapper.addView(
+            panel,
+            FrameLayout.LayoutParams(
+                FrameLayout.LayoutParams.MATCH_PARENT,
+                FrameLayout.LayoutParams.MATCH_PARENT
+            )
+        )
+        // 上边缘贴状态栏下沿、下边缘贴导航栏上沿
+        ViewCompat.setOnApplyWindowInsetsListener(wrapper) { view, insets ->
+            val bars = insets.getInsets(
+                WindowInsetsCompat.Type.systemBars() or WindowInsetsCompat.Type.displayCutout()
+            )
+            view.setPadding(sidePadding, bars.top, sidePadding, bars.bottom)
+            insets
+        }
+        dialog = Dialog(this, R.style.Theme_Legado_ComposeDialog_Center).apply {
+            setContentView(wrapper)
+            setOnDismissListener {
+                (panel.parent as? ViewGroup)?.removeView(panel)
+                catalogDialog = null
+            }
+        }
+        catalogDialog = dialog
+        dialog!!.show()
+        dialog!!.window?.apply {
+            setBackgroundDrawable(ColorDrawable(Color.TRANSPARENT))
+            setLayout(
+                WindowManager.LayoutParams.MATCH_PARENT,
+                WindowManager.LayoutParams.MATCH_PARENT
+            )
+            setGravity(Gravity.TOP)
+            setDimAmount(0.6f)
+            setWindowAnimations(R.style.AnimDialogFade)
+            setSoftInputMode(WindowManager.LayoutParams.SOFT_INPUT_ADJUST_RESIZE)
+        }
+        ViewCompat.requestApplyInsets(wrapper)
+        renderCatalogPager(viewModel.chapterListData.value)
+    }
+
+    private fun openCatalogEntry() {
+        val catalogEnabled = BookInfoComponentConfig.load()
+            .any { it.enabled && it.type == BookInfoComponentType.CATALOG }
+        val buttonMode = BookInfoComponentConfig.loadCatalogOpenMode() ==
+            BookInfoCatalogOpenMode.BUTTON
+        if (!catalogEnabled) {
+            openChapterListSafely()
+            return
+        }
+        if (buttonMode) {
+            if (viewModel.chapterListData.value.isNullOrEmpty()) {
+                toastOnUi(R.string.chapter_list_empty)
+                return
+            }
+            showCatalogDialog()
+            return
+        }
+        if (catalogPageIndex < 0 || !::bookInfoPager.isInitialized) {
+            applyBookInfoComponents()
+        }
+        if (catalogPageIndex in 0 until bookInfoPageAdapter.itemCount) {
+            bookInfoPager.setCurrentItem(catalogPageIndex, true)
+        } else {
+            openChapterListSafely()
+        }
+    }
+
     private fun resetPlainIntroLayout() {
         updateDetailIntroPageSpacing()
         binding.tvIntroContainer.updateLayoutParams<LinearLayout.LayoutParams> {
@@ -3355,10 +3622,22 @@ class BookInfoActivity :
 
     private fun openChapterDirect(chapter: BookChapter) {
         viewModel.getBook()?.let { book ->
+            // 详情页目录跳转前记录当前阅读位置
+            rememberReadPositionBeforeChapterJump(book)
             chapterChanged = true
             viewModel.saveBookAtChapter(book, chapter) { targetBook ->
                 startReadActivity(targetBook)
             }
+        }
+    }
+
+    /**
+     * 从目录跳转前记录跳转前的阅读位置。
+     * 阅读界面还在时直接取当前页；不在时用书籍保存的进度生成记录，等阅读界面启动后接收。
+     */
+    private fun rememberReadPositionBeforeChapterJump(book: Book) {
+        if (!ReadBook.saveCurrentBookProgress(book.bookUrl)) {
+            ReadBook.stageJumpFromStoredProgress(book)
         }
     }
 
@@ -3520,6 +3799,8 @@ class BookInfoActivity :
      }
 
     override fun onDestroy() {
+        catalogDialog?.dismiss()
+        catalogDialog = null
         destroyWeb()
         super.onDestroy()
         if (initGetter) {

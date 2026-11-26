@@ -15,7 +15,7 @@ enum class BookInfoComponentType(
     META(R.string.book_info_component_meta, R.string.book_info_component_meta_hint),
     ACTIONS(R.string.reading, R.string.add_to_bookshelf),
     DETAIL(R.string.book_info_component_detail, R.string.book_info_component_detail_hint),
-    CATALOG(R.string.book_info_tab_toc, R.string.view_toc),
+    CATALOG(R.string.book_info_tab_toc, R.string.book_info_component_catalog_hint),
     AI_IMAGES(R.string.book_info_component_ai_images, R.string.book_info_component_ai_images_hint);
 
     companion object {
@@ -38,6 +38,18 @@ enum class BookInfoPageStyle(val key: String) {
         fun fromKey(key: String?): BookInfoPageStyle {
             return entries.firstOrNull { it.key.equals(key, ignoreCase = true) }
                 ?: CLASSIC
+        }
+    }
+}
+
+enum class BookInfoCatalogOpenMode(val key: String) {
+    SWIPE("swipe"),
+    BUTTON("button");
+
+    companion object {
+        fun fromKey(key: String?): BookInfoCatalogOpenMode {
+            return entries.firstOrNull { it.key.equals(key, ignoreCase = true) }
+                ?: BUTTON
         }
     }
 }
@@ -103,6 +115,16 @@ object BookInfoComponentConfig {
 
     fun saveStyle(style: BookInfoPageStyle) {
         appCtx.putPrefString(PreferKey.bookInfoPageStyle, style.key)
+    }
+
+    fun loadCatalogOpenMode(): BookInfoCatalogOpenMode {
+        return BookInfoCatalogOpenMode.fromKey(
+            appCtx.getPrefString(PreferKey.bookInfoCatalogOpenMode)
+        )
+    }
+
+    fun saveCatalogOpenMode(mode: BookInfoCatalogOpenMode) {
+        appCtx.putPrefString(PreferKey.bookInfoCatalogOpenMode, mode.key)
     }
 
     private fun defaultItems(): MutableList<BookInfoComponentItem> {
