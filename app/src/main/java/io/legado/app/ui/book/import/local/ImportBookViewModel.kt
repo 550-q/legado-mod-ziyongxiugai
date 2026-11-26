@@ -128,6 +128,7 @@ class ImportBookViewModel(application: Application) : BaseViewModel(application)
 
     fun addToBookshelfWithProgress(
         bookList: HashSet<ImportBook>,
+        groupId: Long = -1L,
         onProgress: (ImportProgress) -> Unit,
         finally: () -> Unit
     ) {
@@ -153,7 +154,7 @@ class ImportBookViewModel(application: Application) : BaseViewModel(application)
                         onProgress(progress)
                     }
                     emitItemStage("读取文件信息 ${item.name}")
-                    val books = LocalBook.importFiles(item.file.uri) { stage ->
+                    val books = LocalBook.importFiles(item.file.uri, groupId) { stage ->
                         emitItemStage("$stage ${item.name}")
                     }
                     books.forEach { book ->

@@ -267,8 +267,14 @@ object LocalBook {
 
     /**
      * 导入本地文件
+     *
+     * @param groupId 导入后所属分组, -1 表示不修改分组
      */
-    fun importFile(uri: Uri, onStage: ((String) -> Unit)? = null): Book {
+    fun importFile(
+        uri: Uri,
+        groupId: Long = -1L,
+        onStage: ((String) -> Unit)? = null
+    ): Book {
         //updateTime变量不要修改,否则会导致读取不到缓存
         onStage?.invoke("读取文件信息")
         val fileDoc = FileDoc.fromUri(uri, false)
@@ -288,7 +294,8 @@ object LocalBook {
                 author = nameAuthor.second,
                 originName = fileName,
                 latestChapterTime = updateTime,
-                order = appDb.bookDao.minOrder - 1
+                order = appDb.bookDao.minOrder - 1,
+                group = groupId.coerceAtLeast(0L)
             )
             upBookInfoSafely(book, fileSize)
             onStage?.invoke("保存书籍信息")
@@ -301,6 +308,10 @@ object LocalBook {
             book.latestChapterTime = 0
             //已有书籍说明是更新,删除原有目录
             appDb.bookChapterDao.delByBook(bookUrl)
+            if (groupId >= 0 && book.group != groupId) {
+                book.group = groupId
+                appDb.bookDao.update(book)
+            }
         }
         return book
     }
@@ -349,6 +360,7 @@ object LocalBook {
     fun importArchiveFile(
         archiveFileUri: Uri,
         saveFileName: String? = null,
+        groupId: Long = -1L,
         filter: ((String) -> Boolean)? = null
     ): List<Book> {
         val archiveFileDoc = FileDoc.fromUri(archiveFileUri, false)
@@ -358,7 +370,7 @@ object LocalBook {
         }
         return files.map {
             saveBookFile(FileInputStream(it), saveFileName ?: it.name).let { uri ->
-                importFile(uri).apply {
+                importFile(uri, groupId).apply {
                     //附加压缩包名称 以便解压文件被删后再解压
                     origin = "${BookType.localTag}::${archiveFileDoc.name}"
                     addType(BookType.archive)
@@ -369,19 +381,23 @@ object LocalBook {
     }
 
     /* 批量导入 支持自动导入压缩包的支持书籍 */
-    fun importFiles(uri: Uri, onStage: ((String) -> Unit)? = null): List<Book> {
+    fun importFiles(
+        uri: Uri,
+        groupId: Long = -1L,
+        onStage: ((String) -> Unit)? = null
+    ): List<Book> {
         val books = mutableListOf<Book>()
         onStage?.invoke("读取文件信息")
         val fileDoc = FileDoc.fromUri(uri, false)
         if (ArchiveUtils.isArchive(fileDoc.name)) {
             onStage?.invoke("解压压缩包")
             books.addAll(
-                importArchiveFile(uri) {
+                importArchiveFile(uri, groupId = groupId) {
                     it.matches(AppPattern.bookFileRegex)
                 }
             )
         } else {
-            books.add(importFile(uri, onStage))
+            books.add(importFile(uri, groupId, onStage))
         }
         return books
     }

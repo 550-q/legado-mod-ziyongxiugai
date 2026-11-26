@@ -138,7 +138,11 @@ abstract class BaseBookshelfFragment(layoutId: Int) : VMBaseFragment<BookshelfVi
             R.id.menu_book_tag_manage -> startActivity<BookshelfTagManageActivity> {
                 putExtra("groupId", groupId)
             }
-            R.id.menu_add_local -> startActivity<ImportBookActivity>()
+            R.id.menu_add_local -> startActivity<ImportBookActivity> {
+                if (groupId > 0) {
+                    putExtra(ImportBookActivity.EXTRA_GROUP_ID, groupId)
+                }
+            }
             R.id.menu_add_url -> showAddBookByUrlAlert()
             R.id.menu_bookshelf_manage -> startActivity<BookshelfManageActivity> {
                 putExtra("groupId", groupId)
