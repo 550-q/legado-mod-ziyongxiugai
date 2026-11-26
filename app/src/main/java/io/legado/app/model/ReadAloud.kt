@@ -227,10 +227,19 @@ object ReadAloud {
     }
 
     fun setTimer(context: Context, minute: Int) {
+        setTimerSeconds(context, minute * 60, bySecond = false)
+    }
+
+    /**
+     * @param seconds 定时秒数，0 表示取消定时
+     * @param bySecond 是否按秒计时（用于面板显示）
+     */
+    fun setTimerSeconds(context: Context, seconds: Int, bySecond: Boolean) {
         if (BaseReadAloudService.isRun) {
             val intent = Intent(context, aloudClass)
             intent.action = IntentAction.setTimer
-            intent.putExtra("minute", minute)
+            intent.putExtra("seconds", seconds)
+            intent.putExtra("bySecond", bySecond)
             context.startForegroundServiceCompat(intent)
         }
     }

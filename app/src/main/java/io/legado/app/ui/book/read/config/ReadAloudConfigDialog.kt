@@ -26,8 +26,8 @@ import io.legado.app.help.readaloud.speech.SpeechRoute
 import io.legado.app.lib.theme.UiCorner
 import io.legado.app.lib.permission.Permissions
 import io.legado.app.lib.permission.PermissionsCompat
+import io.legado.app.lib.theme.accentColor
 import io.legado.app.lib.theme.dialogSurfaceBackground
-import io.legado.app.lib.theme.primaryColor
 import io.legado.app.lib.theme.primaryTextColor
 import io.legado.app.lib.theme.themeCardColorOrDefault
 import io.legado.app.lib.theme.uiTypeface
@@ -74,6 +74,7 @@ enum class ReadAloudConfigGroup(
             PreferKey.pauseReadAloudWhilePhoneCalls,
             PreferKey.readAloudWakeLock,
             PreferKey.showReadAloudFloatingBall,
+            PreferKey.pauseReadAloudAfterTimer,
             KEY_MEDIA_BUTTON_PER_NEXT
         )
     ),
@@ -229,7 +230,7 @@ class ReadAloudConfigDialog : BasePrefDialogFragment() {
             val selected = tabGroup == group
             tab.isSelected = selected
             tab.setTextColor(
-                if (selected) requireContext().primaryColor
+                if (selected) requireContext().accentColor
                 else requireContext().primaryTextColor
             )
         }
@@ -393,6 +394,18 @@ class ReadAloudConfigDialog : BasePrefDialogFragment() {
                     key = KEY_MEDIA_BUTTON_PER_NEXT,
                     title = getString(R.string.pref_media_button_per_next),
                     summary = getString(R.string.pref_media_button_per_next_summary),
+                    defaultValue = false
+                ),
+                switch(
+                    key = PreferKey.pauseReadAloudAfterTimer,
+                    title = getString(R.string.pause_read_aloud_after_timer_title),
+                    summary = getString(
+                        if (AppConfig.pauseReadAloudAfterTimer) {
+                            R.string.pause_read_aloud_after_timer_summary_on
+                        } else {
+                            R.string.pause_read_aloud_after_timer_summary_off
+                        }
+                    ),
                     defaultValue = false
                 )
             )

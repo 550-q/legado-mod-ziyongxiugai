@@ -45,6 +45,7 @@ import androidx.compose.foundation.gestures.scrollBy
 import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.Column
@@ -74,12 +75,15 @@ import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.CircularProgressIndicator
+import androidx.compose.material3.LocalTextStyle
 import androidx.compose.material3.Icon
 import androidx.compose.material3.OutlinedTextField
+import androidx.compose.material3.OutlinedTextFieldDefaults
 import androidx.compose.material3.Slider
 import androidx.compose.material3.SliderDefaults
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
@@ -112,6 +116,7 @@ import androidx.compose.ui.platform.LocalLayoutDirection
 import androidx.compose.ui.platform.ViewCompositionStrategy
 import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.Dp
@@ -119,6 +124,7 @@ import androidx.compose.ui.unit.IntOffset
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.compose.ui.viewinterop.AndroidView
+import androidx.compose.ui.window.Dialog
 import io.legado.app.ui.widget.compose.BookCoverImage
 import io.legado.app.ui.widget.compose.releaseComposeImage
 import androidx.lifecycle.LifecycleOwner
@@ -298,6 +304,8 @@ class ReadAloudPlayerPanel @JvmOverloads constructor(
         val playbackBusy: Boolean = false,
         val serviceRunning: Boolean = false,
         val timerMinute: Int = 0,
+        val timerRemainSeconds: Int = 0,
+        val timerBySecond: Boolean = false,
         val progress: Float = 0f,
         val progressText: String = "0%",
         val paragraphText: String = "",
@@ -704,6 +712,7 @@ class ReadAloudPlayerPanel @JvmOverloads constructor(
             ReadAloud.selectChapter(context, targetIndex, continuePlayback = shouldPlay)
             return
         }
+        ReadBook.saveCurrentBookProgress()
         ReadBook.openChapter(targetIndex, upContent = true) {
             onChapterContentChanged()
         }
@@ -812,7 +821,11 @@ class ReadAloudPlayerPanel @JvmOverloads constructor(
     }
 
     fun onTimerChanged(minute: Int) {
-        uiState = uiState.copy(timerMinute = minute)
+        uiState = uiState.copy(
+            timerMinute = BaseReadAloudService.timeMinute,
+            timerRemainSeconds = BaseReadAloudService.timerRemainSeconds,
+            timerBySecond = BaseReadAloudService.timerBySecond
+        )
     }
 
     fun setForegroundActive(active: Boolean) {
@@ -1011,10 +1024,17 @@ class ReadAloudPlayerPanel @JvmOverloads constructor(
         (context as? AppCompatActivity)?.showDialogFragment(ReadAloudConfigDialog())
     }
 
-    private fun setTimer(minute: Int) {
-        AppConfig.ttsTimer = minute
-        ReadAloud.setTimer(context, minute)
-        uiState = uiState.copy(timerMinute = minute)
+    private fun setTimer(seconds: Int, bySecond: Boolean) {
+        val safeSeconds = seconds.coerceAtLeast(0)
+        AppConfig.ttsTimerSeconds = safeSeconds
+        AppConfig.ttsTimerBySecond = bySecond
+        AppConfig.ttsTimer = (safeSeconds + 59) / 60
+        ReadAloud.setTimerSeconds(context, safeSeconds, bySecond)
+        uiState = uiState.copy(
+            timerMinute = if (safeSeconds <= 0) 0 else (safeSeconds + 59) / 60,
+            timerRemainSeconds = safeSeconds,
+            timerBySecond = safeSeconds > 0 && bySecond
+        )
     }
 
     private fun selectTtsEngine(value: String) {
@@ -1348,6 +1368,8 @@ class ReadAloudPlayerPanel @JvmOverloads constructor(
                     playbackPhase == ReadAloudPlaybackState.PHASE_BUFFERING,
             serviceRunning = BaseReadAloudService.isRun,
             timerMinute = timerMinute,
+            timerRemainSeconds = BaseReadAloudService.timerRemainSeconds,
+            timerBySecond = BaseReadAloudService.timerBySecond,
             progress = paragraphProgress,
             progressText = paragraphProgressText,
             paragraphText = paragraphText,
@@ -1721,7 +1743,7 @@ private fun ReadAloudPlayerContent(
     onNextChapter: () -> Unit,
     onChapterSelect: (Int) -> Unit,
     onOpenSettings: () -> Unit,
-    onTimerChange: (Int) -> Unit,
+    onTimerChange: (Int, Boolean) -> Unit,
     onEngineSelect: (String) -> Unit,
     onEngineSheetOpen: () -> Unit,
     onProgressSeek: (Float) -> Unit,
@@ -4686,8 +4708,13 @@ private fun PlayerControlDock(
             }
             FeaturePill(
                 icon = R.drawable.ic_time_add_24dp,
-                text = if (state.timerMinute > 0) context.getString(R.string.timer_m, state.timerMinute)
-                else context.getString(R.string.set_timer),
+                text = when {
+                    state.timerRemainSeconds > 0 && state.timerBySecond ->
+                        context.getString(R.string.timer_s, state.timerRemainSeconds)
+
+                    state.timerMinute > 0 -> context.getString(R.string.timer_m, state.timerMinute)
+                    else -> context.getString(R.string.set_timer)
+                },
                 selected = activeSheet == PlayerSheet.Timer,
                 colors = colors,
                 modifier = Modifier.weight(1f)
@@ -4797,7 +4824,7 @@ private fun PlayerSheetPanel(
     onPreviousChapter: () -> Unit,
     onNextChapter: () -> Unit,
     onChapterSelect: (Int) -> Unit,
-    onTimerChange: (Int) -> Unit,
+    onTimerChange: (Int, Boolean) -> Unit,
     onEngineSelect: (String) -> Unit,
     onOpenCharacters: () -> Unit,
     modifier: Modifier = Modifier
@@ -5024,11 +5051,13 @@ private fun SheetActionButton(
 private fun TimerSheet(
     state: ReadAloudPlayerPanel.PlayerUiState,
     colors: PlayerColors,
-    onTimerChange: (Int) -> Unit
+    onTimerChange: (Int, Boolean) -> Unit
 ) {
     val context = LocalContext.current
     val actionShape = context.composeActionShape()
-    val times = listOf(0, 5, 10, 15, 30, 60, 90, 180)
+    var showCustomTimer by remember { mutableStateOf(false) }
+    val presets = listOf(0, 5, 10, 15, 30, 60, 90)
+    val customSelected = state.timerRemainSeconds > 0 && state.timerBySecond
     Column(
         modifier = Modifier.padding(16.dp),
         verticalArrangement = Arrangement.spacedBy(10.dp)
@@ -5039,30 +5068,181 @@ private fun TimerSheet(
             fontSize = 13.sp,
             fontWeight = FontWeight.SemiBold
         )
-        times.chunked(4).forEach { row ->
+        presets.map { it to false }.plus(listOf(-1 to true)).chunked(4).forEach { row ->
             Row(
                 modifier = Modifier.fillMaxWidth(),
                 horizontalArrangement = Arrangement.spacedBy(8.dp)
             ) {
-                row.forEach { minute ->
-                    val selected = state.timerMinute == minute || (state.timerMinute <= 0 && minute == 0)
+                row.forEach { (minute, custom) ->
+                    val selected = when {
+                        custom -> customSelected
+                        minute == 0 -> state.timerRemainSeconds <= 0
+                        else -> !state.timerBySecond && state.timerMinute == minute
+                    }
                     Surface(
                         modifier = Modifier
                             .weight(1f)
                             .height(38.dp)
-                            .clickable { onTimerChange(minute) },
+                            .clickable {
+                                if (custom) {
+                                    showCustomTimer = true
+                                } else {
+                                    onTimerChange(minute * 60, false)
+                                }
+                            },
                         shape = actionShape,
                         color = if (selected) colors.accent else colors.panel
                     ) {
                         Box(contentAlignment = Alignment.Center) {
                             Text(
-                                text = context.getString(R.string.timer_m, minute),
+                                text = if (custom) {
+                                    context.getString(R.string.timer_custom)
+                                } else {
+                                    context.getString(R.string.timer_m, minute)
+                                },
                                 color = if (selected) colors.accentText else colors.primaryText,
                                 fontSize = 12.sp,
                                 fontWeight = if (selected) FontWeight.SemiBold else FontWeight.Normal,
                                 maxLines = 1
                             )
                         }
+                    }
+                }
+            }
+        }
+    }
+    if (showCustomTimer) {
+        CustomTimerDialog(
+            colors = colors,
+            onDismiss = { showCustomTimer = false },
+            onConfirm = { value, bySecond ->
+                showCustomTimer = false
+                AppConfig.ttsTimerCustomValue = value
+                AppConfig.ttsTimerCustomBySecond = bySecond
+                onTimerChange(if (bySecond) value else value * 60, bySecond)
+            }
+        )
+    }
+}
+
+/**
+ * 自定义定时：只能输入数字，可切换按分 / 按秒计时
+ */
+@Composable
+private fun CustomTimerDialog(
+    colors: PlayerColors,
+    onDismiss: () -> Unit,
+    onConfirm: (Int, Boolean) -> Unit
+) {
+    val context = LocalContext.current
+    val actionShape = context.composeActionShape()
+    val panelShape = context.composePanelShape()
+    var valueText by remember {
+        mutableStateOf(AppConfig.ttsTimerCustomValue.coerceIn(1, 9999).toString())
+    }
+    var bySecond by remember { mutableStateOf(AppConfig.ttsTimerCustomBySecond) }
+    val value = valueText.toIntOrNull() ?: 0
+    val canConfirm = value > 0
+    Dialog(onDismissRequest = onDismiss) {
+        Surface(
+            modifier = Modifier
+                .fillMaxWidth()
+                .widthIn(max = 420.dp),
+            shape = panelShape,
+            color = colors.panelStrong,
+            border = BorderStroke(1.dp, colors.panelBorder)
+        ) {
+            Column(
+                modifier = Modifier.padding(18.dp),
+                verticalArrangement = Arrangement.spacedBy(14.dp)
+            ) {
+                Text(
+                    text = context.getString(R.string.timer_custom_title),
+                    color = colors.primaryText,
+                    fontSize = 16.sp,
+                    fontWeight = FontWeight.SemiBold
+                )
+                OutlinedTextField(
+                    value = valueText,
+                    onValueChange = { input ->
+                        valueText = input.filter { it in '0'..'9' }.take(4)
+                    },
+                    modifier = Modifier.fillMaxWidth(),
+                    singleLine = true,
+                    label = {
+                        Text(
+                            context.getString(
+                                if (bySecond) R.string.timer_unit_second
+                                else R.string.timer_unit_minute
+                            )
+                        )
+                    },
+                    keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
+                    shape = actionShape,
+                    colors = OutlinedTextFieldDefaults.colors(
+                        focusedTextColor = colors.primaryText,
+                        unfocusedTextColor = colors.primaryText,
+                        focusedContainerColor = colors.panel,
+                        unfocusedContainerColor = colors.panel,
+                        cursorColor = colors.accent,
+                        focusedBorderColor = colors.accent,
+                        unfocusedBorderColor = colors.panelBorder,
+                        focusedLabelColor = colors.accent,
+                        unfocusedLabelColor = colors.secondaryText
+                    ),
+                    textStyle = LocalTextStyle.current.copy(color = colors.primaryText)
+                )
+                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    listOf(
+                        false to context.getString(R.string.timer_unit_minute),
+                        true to context.getString(R.string.timer_unit_second)
+                    ).forEach { (unitSecond, label) ->
+                        val unitSelected = unitSecond == bySecond
+                        Surface(
+                            modifier = Modifier
+                                .weight(1f)
+                                .height(36.dp),
+                            shape = actionShape,
+                            color = if (unitSelected) colors.accent else colors.panel,
+                            border = BorderStroke(
+                                1.dp,
+                                if (unitSelected) colors.accent else colors.panelBorder
+                            ),
+                            onClick = { bySecond = unitSecond }
+                        ) {
+                            Box(contentAlignment = Alignment.Center) {
+                                Text(
+                                    text = label,
+                                    color = if (unitSelected) colors.accentText else colors.primaryText,
+                                    fontSize = 13.sp,
+                                    fontWeight = if (unitSelected) FontWeight.SemiBold else FontWeight.Normal,
+                                    maxLines = 1
+                                )
+                            }
+                        }
+                    }
+                }
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.End
+                ) {
+                    TextButton(onClick = onDismiss) {
+                        Text(
+                            text = context.getString(R.string.cancel),
+                            color = colors.secondaryText,
+                            fontSize = 14.sp
+                        )
+                    }
+                    TextButton(
+                        onClick = { if (canConfirm) onConfirm(value, bySecond) },
+                        enabled = canConfirm
+                    ) {
+                        Text(
+                            text = context.getString(R.string.ok),
+                            color = if (canConfirm) colors.accent else colors.subtleText,
+                            fontSize = 14.sp,
+                            fontWeight = FontWeight.SemiBold
+                        )
                     }
                 }
             }
