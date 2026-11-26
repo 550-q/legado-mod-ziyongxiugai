@@ -39,6 +39,7 @@ import androidx.compose.ui.platform.ViewCompositionStrategy
 import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.sp
 import androidx.fragment.app.viewModels
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import io.legado.app.R
@@ -58,10 +59,11 @@ import kotlinx.coroutines.flow.conflate
 
 class GroupSelectDialog() : ComposeDialogFragment() {
 
-    constructor(groupId: Long, requestCode: Int = -1) : this() {
+    constructor(groupId: Long, requestCode: Int = -1, showMultiHint: Boolean = false) : this() {
         arguments = Bundle().apply {
             putLong("groupId", groupId)
             putInt("requestCode", requestCode)
+            putBoolean("showMultiHint", showMultiHint)
         }
     }
 
@@ -80,6 +82,7 @@ class GroupSelectDialog() : ComposeDialogFragment() {
     ): View {
         val initialGroupId = arguments?.getLong("groupId") ?: 0L
         requestCode = arguments?.getInt("requestCode", -1) ?: -1
+        val showMultiHint = arguments?.getBoolean("showMultiHint", false) ?: false
         return ComposeView(requireContext()).apply {
             setViewCompositionStrategy(ViewCompositionStrategy.DisposeOnViewTreeLifecycleDestroyed)
             setContent {
@@ -90,6 +93,7 @@ class GroupSelectDialog() : ComposeDialogFragment() {
                     GroupSelectContent(
                         groups = groups,
                         selectedGroupId = selectedGroupId,
+                        showMultiHint = showMultiHint,
                         onGroupToggle = { group ->
                             selectedGroupId = if ((selectedGroupId and group.groupId) > 0) {
                                 selectedGroupId - group.groupId
@@ -127,27 +131,28 @@ private fun GroupSelectContent(
     onAddGroup: () -> Unit,
     onEditGroup: (BookGroup) -> Unit,
     onConfirm: () -> Unit,
-    onCancel: () -> Unit
+    onCancel: () -> Unit,
+    showMultiHint: Boolean = false
 ) {
     val style = rememberAppDialogStyle()
     val palette = style.toMiuixPalette()
+    // 取消/确认 之间的间距，避免两个按钮贴在一起误触
+    val actionSpacing = 12.dp
     AppDialogFrame(
         title = stringResource(R.string.group_select),
         scrollContent = false,
         content = {
             Column(modifier = Modifier.fillMaxWidth()) {
-                Row(
-                    modifier = Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.End
-                ) {
-                    LegadoMiuixActionButton(
-                        text = stringResource(R.string.add_group),
-                        palette = palette,
-                        onClick = onAddGroup,
-                        cornerRadius = style.actionRadius
+                if (showMultiHint) {
+                    Text(
+                        text = stringResource(R.string.group_select_multi_hint),
+                        color = style.accent,
+                        fontSize = 13.sp,
+                        lineHeight = 19.sp,
+                        fontFamily = style.bodyFontFamily
                     )
+                    Spacer(modifier = Modifier.height(12.dp))
                 }
-                Spacer(modifier = Modifier.height(12.dp))
                 LazyColumn(
                     modifier = Modifier
                         .fillMaxWidth()
@@ -166,20 +171,33 @@ private fun GroupSelectContent(
                 }
             }
         },
+        startActions = {
+            LegadoMiuixActionButton(
+                text = stringResource(R.string.group_select_new_group),
+                palette = palette,
+                onClick = onAddGroup,
+                cornerRadius = style.actionRadius
+            )
+        },
         actions = {
-            LegadoMiuixActionButton(
-                text = stringResource(R.string.cancel),
-                palette = palette,
-                onClick = onCancel,
-                cornerRadius = style.actionRadius
-            )
-            LegadoMiuixActionButton(
-                text = stringResource(R.string.ok),
-                palette = palette,
-                onClick = onConfirm,
-                primary = true,
-                cornerRadius = style.actionRadius
-            )
+            Row(
+                horizontalArrangement = Arrangement.spacedBy(actionSpacing),
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                LegadoMiuixActionButton(
+                    text = stringResource(R.string.cancel),
+                    palette = palette,
+                    onClick = onCancel,
+                    cornerRadius = style.actionRadius
+                )
+                LegadoMiuixActionButton(
+                    text = stringResource(R.string.ok),
+                    palette = palette,
+                    onClick = onConfirm,
+                    primary = true,
+                    cornerRadius = style.actionRadius
+                )
+            }
         }
     )
 }
