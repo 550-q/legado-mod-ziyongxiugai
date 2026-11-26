@@ -44,6 +44,7 @@ import io.legado.app.data.entities.Book
 import io.legado.app.data.entities.BookGroup
 import io.legado.app.databinding.FragmentBookshelf2Binding
 import io.legado.app.help.config.AppConfig
+import io.legado.app.help.config.FastScrollerConfig
 import io.legado.app.lib.theme.accentColor
 import io.legado.app.lib.theme.primaryColor
 import io.legado.app.ui.book.group.GroupEditDialog
@@ -248,8 +249,9 @@ class BookshelfFragment2() : BaseBookshelfFragment(R.layout.fragment_bookshelf2)
             }
             ComposeLazyGridFastScroller(
                 state = gridState,
-                enabled = AppConfig.showBookshelfFastScroller,
-                modifier = Modifier.align(Alignment.CenterEnd)
+                enabled = FastScrollerConfig.bookshelfScrollerEnabled,
+                modifier = Modifier.align(Alignment.CenterEnd),
+                bottomInset = bottomBarPadding
             )
         }
     }
@@ -339,8 +341,9 @@ class BookshelfFragment2() : BaseBookshelfFragment(R.layout.fragment_bookshelf2)
             }
             ComposeLazyListFastScroller(
                 state = listState,
-                enabled = AppConfig.showBookshelfFastScroller,
-                modifier = Modifier.align(Alignment.CenterEnd)
+                enabled = FastScrollerConfig.bookshelfScrollerEnabled,
+                modifier = Modifier.align(Alignment.CenterEnd),
+                bottomInset = bottomBarPadding
             )
         }
     }
@@ -402,7 +405,7 @@ class BookshelfFragment2() : BaseBookshelfFragment(R.layout.fragment_bookshelf2)
                     Lifecycle.State.RESUMED,
                     AppDatabase.BOOK_TABLE_NAME
                 ).catch {
-                    AppLog.put("涔︽灦鏇存柊鍑洪敊", it)
+                    AppLog.put("书架更新出错", it)
                 }.conflate().flowOn(Dispatchers.Default).collect { (list, items) ->
                     shelfDisplays = list
                     books = list.map { it.toMinimalBook() }

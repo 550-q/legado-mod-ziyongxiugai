@@ -4,14 +4,14 @@ import android.animation.Animator
 import android.animation.AnimatorListenerAdapter
 import android.annotation.SuppressLint
 import android.content.Context
-import android.graphics.Color
 import android.graphics.drawable.Drawable
 import android.util.AttributeSet
-import android.util.TypedValue
+import android.view.Gravity
 import android.view.MotionEvent
 import android.view.View
 import android.view.ViewGroup
 import android.view.ViewPropertyAnimator
+import android.view.animation.OvershootInterpolator
 import android.widget.*
 import androidx.annotation.ColorInt
 import androidx.annotation.IdRes
@@ -21,7 +21,6 @@ import androidx.coordinatorlayout.widget.CoordinatorLayout
 import androidx.core.content.ContextCompat
 import androidx.core.graphics.drawable.DrawableCompat
 import androidx.core.view.GravityCompat
-import androidx.core.view.ViewCompat
 import androidx.core.view.isVisible
 import androidx.recyclerview.widget.LinearLayoutManager
 import androidx.recyclerview.widget.RecyclerView
@@ -31,6 +30,7 @@ import io.legado.app.help.config.AppConfig
 import io.legado.app.lib.theme.accentColor
 import io.legado.app.utils.ColorUtils
 import io.legado.app.utils.getCompatColor
+import kotlin.math.abs
 import kotlin.math.max
 import kotlin.math.min
 import kotlin.math.roundToInt
@@ -52,7 +52,7 @@ class FastScroller : LinearLayout {
     private var mScrollbarAnimator: ViewPropertyAnimator? = null
     private var mBubbleAnimator: ViewPropertyAnimator? = null
     private var mRecyclerView: RecyclerView? = null
-    private lateinit var mBubbleView: TextView
+    private lateinit var mBubbleView: FastScrollBubble
     private lateinit var mHandleView: ImageView
     private lateinit var mTrackView: ImageView
     private lateinit var mScrollbar: View
@@ -60,12 +60,34 @@ class FastScroller : LinearLayout {
     private var mHandleImage: Drawable? = null
     private var mTrackImage: Drawable? = null
     private var mFastScrollStateChangeListener: FastScrollStateChangeListener? = null
-    private val mScrollbarHider = Runnable { this.hideScrollbar() }
+    private var mDragFromBubble = false
+    private var mLastTouchY = 0f
+    private var mDragCenterY = 0f
+    private val mTouchExpandPx = 12f * resources.displayMetrics.density
+    // 滚动条和气泡分开淡出：气泡要比滚动条多留一会儿，方便松手后去抓
+    private val mScrollbarHider = Runnable { hideScrollbar() }
+    private val mBubbleHider = Runnable { hideBubble() }
+    private var mGestureDistancePx = 0f
+    private var mVelocityPxPerSecond = 0f
+    private var mLastScrollTimeNanos = 0L
+    private var mBubbleShownInGesture = false
 
     private val mScrollListener = object : RecyclerView.OnScrollListener() {
         override fun onScrolled(recyclerView: RecyclerView, dx: Int, dy: Int) {
-            if (!mHandleView.isSelected && isEnabled) {
-                setViewPositions(getScrollProportion(recyclerView))
+            if (!isEnabled) {
+                return
+            }
+            if (mHandleView.isSelected) {
+                return
+            }
+            setViewPositions(getScrollProportion(recyclerView))
+            if (!isViewVisible(mScrollbar)) {
+                showScrollbar()
+            }
+            trackGesture(recyclerView, dy)
+            handler.removeCallbacks(mScrollbarHider)
+            if (mFadeScrollbar) {
+                handler.postDelayed(mScrollbarHider, sScrollbarHideDelay.toLong())
             }
         }
 
@@ -75,13 +97,22 @@ class FastScroller : LinearLayout {
                 when (newState) {
                     RecyclerView.SCROLL_STATE_DRAGGING -> {
                         handler.removeCallbacks(mScrollbarHider)
+                        handler.removeCallbacks(mBubbleHider)
                         cancelAnimation(mScrollbarAnimator)
                         if (!isViewVisible(mScrollbar)) {
                             showScrollbar()
                         }
+                        // 停留期内手指一碰列表，气泡立即淡出；不去碰则等 1.5 秒再淡出
+                        if (!mHandleView.isSelected && isViewVisible(mBubbleView)) {
+                            hideBubble()
+                        }
+                        startGestureTracking()
                     }
-                    RecyclerView.SCROLL_STATE_IDLE -> if (mFadeScrollbar && !mHandleView.isSelected) {
-                        handler.postDelayed(mScrollbarHider, sScrollbarHideDelay.toLong())
+                    RecyclerView.SCROLL_STATE_IDLE -> if (!mHandleView.isSelected) {
+                        if (mFadeScrollbar) {
+                            handler.postDelayed(mScrollbarHider, sScrollbarHideDelay.toLong())
+                        }
+                        settleGesture()
                     }
                 }
             }
@@ -166,7 +197,7 @@ class FastScroller : LinearLayout {
             }
             else -> throw IllegalArgumentException("Parent ViewGroup must be a ConstraintLayout, CoordinatorLayout, FrameLayout, or RelativeLayout")
         }
-        applyTouchTargetWidth()
+        applyBubbleMetrics()
         updateViewHeights()
     }
 
@@ -252,30 +283,20 @@ class FastScroller : LinearLayout {
     }
 
     /**
-     * Set the background color of the index bubble.
+     * Set the background color of the drag bubble.
      *
-     * @param color The background color for the index bubble
+     * @param color The background color for the drag bubble
      */
     fun setBubbleColor(@ColorInt color: Int) {
         mBubbleColor = color
-        if (mBubbleImage == null) {
-            val drawable = ContextCompat.getDrawable(context, R.drawable.fastscroll_bubble)
-            if (drawable != null) {
-                mBubbleImage = DrawableCompat.wrap(drawable)
-            }
-        }
-        DrawableCompat.setTint(mBubbleImage!!, mBubbleColor)
-        mBubbleView.background = mBubbleImage
+        mBubbleView.setBubbleColor(color)
     }
 
     /**
-     * Set the text color of the index bubble.
-     *
-     * @param color The text color for the index bubble
+     * 气泡已改为抓握手柄，不再显示文字；保留接口避免调用方编译失败。
      */
-    fun setBubbleTextColor(@ColorInt color: Int) {
-        mBubbleView.setTextColor(color)
-    }
+    @Suppress("UNUSED_PARAMETER")
+    fun setBubbleTextColor(@ColorInt color: Int) = Unit
 
     /**
      * Set the fast scroll state change listener.
@@ -296,41 +317,61 @@ class FastScroller : LinearLayout {
     override fun onTouchEvent(event: MotionEvent): Boolean {
         when (event.action) {
             MotionEvent.ACTION_DOWN -> {
-                if (event.x < mHandleView.x - ViewCompat.getPaddingStart(mHandleView)) {
+                if (!mScrollbar.isVisible) {
                     return false
                 }
-                if (!mScrollbar.isVisible) {
+                if (!isHitTarget(event.x, event.y)) {
                     return false
                 }
                 requestDisallowInterceptTouchEvent(true)
                 setHandleSelected(true)
                 handler.removeCallbacks(mScrollbarHider)
+                handler.removeCallbacks(mBubbleHider)
+                mBubbleShownInGesture = true
                 cancelAnimation(mScrollbarAnimator)
                 cancelAnimation(mBubbleAnimator)
-                if (mShowBubble && mSectionIndexer != null) {
-                    showBubble()
-                }
+                showBubble()
                 if (mFastScrollStateChangeListener != null) {
                     mFastScrollStateChangeListener!!.onFastScrollStart(this)
                 }
-                val y = event.y
-                setViewPositions(y)
-                setRecyclerViewPosition(y)
+                mDragFromBubble = event.x < mScrollbar.x
+                mLastTouchY = event.y
+                if (mDragFromBubble) {
+                    mDragCenterY = mScrollbar.y + mHandleView.y + mHandleHeight / 2f
+                } else {
+                    setViewPositions(event.y)
+                    setRecyclerViewPosition(event.y)
+                }
                 return true
             }
             MotionEvent.ACTION_MOVE -> {
                 val y = event.y
-                setViewPositions(y)
-                setRecyclerViewPosition(y)
+                if (mDragFromBubble) {
+                    mDragCenterY += y - mLastTouchY
+                    mLastTouchY = y
+                    val centerY = mDragCenterY.coerceIn(0f, mViewHeight.toFloat())
+                    setViewPositions(centerY)
+                    setRecyclerViewPosition(centerY)
+                } else {
+                    setViewPositions(y)
+                    setRecyclerViewPosition(y)
+                }
                 return true
             }
             MotionEvent.ACTION_UP, MotionEvent.ACTION_CANCEL -> {
                 requestDisallowInterceptTouchEvent(false)
                 setHandleSelected(false)
+                mDragFromBubble = false
                 if (mFadeScrollbar) {
                     handler.postDelayed(mScrollbarHider, sScrollbarHideDelay.toLong())
                 }
-                hideBubble()
+                if (isViewVisible(mBubbleView)) {
+                    handler.removeCallbacks(mBubbleHider)
+                    handler.postDelayed(
+                        mBubbleHider,
+                        FastScrollerBubblePolicy.SETTLE_HOLD_MS
+                    )
+                }
                 if (mFastScrollStateChangeListener != null) {
                     mFastScrollStateChangeListener!!.onFastScrollStop(this)
                 }
@@ -340,9 +381,122 @@ class FastScroller : LinearLayout {
         return super.onTouchEvent(event)
     }
 
+    private fun isHitTarget(x: Float, y: Float): Boolean {
+        if (isViewVisible(mBubbleView)) {
+            val bubbleX = mBubbleView.x
+            val bubbleY = mBubbleView.y
+            if (x >= bubbleX && x <= bubbleX + mBubbleView.width &&
+                y >= bubbleY && y <= bubbleY + mBubbleView.height
+            ) {
+                return true
+            }
+        }
+        val expand = mTouchExpandPx
+        val handleLeft = mScrollbar.x + mHandleView.x
+        val handleTop = mScrollbar.y + mHandleView.y
+        return x >= handleLeft - expand &&
+                x <= handleLeft + mHandleView.width + expand &&
+                y >= handleTop - expand &&
+                y <= handleTop + mHandleHeight + expand
+    }
+
     override fun onSizeChanged(w: Int, h: Int, oldw: Int, oldh: Int) {
         super.onSizeChanged(w, h, oldw, oldh)
         mViewHeight = h
+    }
+
+    private fun startGestureTracking() {
+        mGestureDistancePx = 0f
+        mVelocityPxPerSecond = 0f
+        mLastScrollTimeNanos = 0L
+        mBubbleShownInGesture = false
+    }
+
+    /**
+     * 按「累积距离 + 瞬时速度」决定要不要弹气泡，只在拖动阶段判，
+     * fling 阶段手指不在屏上，弹出来也抓不到，留给 [settleGesture] 处理。
+     */
+    private fun trackGesture(recyclerView: RecyclerView, dy: Int) {
+        if (!mShowBubble || mBubbleShownInGesture) {
+            return
+        }
+        val viewport = mViewHeight
+        if (viewport <= 0) {
+            return
+        }
+        val now = System.nanoTime()
+        val deltaSeconds = if (mLastScrollTimeNanos == 0L) {
+            0f
+        } else {
+            (now - mLastScrollTimeNanos) / 1_000_000_000f
+        }
+        mLastScrollTimeNanos = now
+        mGestureDistancePx += abs(dy)
+        if (deltaSeconds in 0.008f..0.1f) {
+            val instant = abs(dy) / deltaSeconds
+            mVelocityPxPerSecond = if (mVelocityPxPerSecond <= 0f) {
+                instant
+            } else {
+                mVelocityPxPerSecond * 0.7f + instant * 0.3f
+            }
+        }
+        if (recyclerView.scrollState != RecyclerView.SCROLL_STATE_DRAGGING) {
+            return
+        }
+        if (!hasEnoughContentForBubble(recyclerView)) {
+            return
+        }
+        val density = resources.displayMetrics.density
+        val distanceTriggerPx = FastScrollerBubblePolicy.dragTriggerPx(viewport, density)
+        val flickTriggerPx = FastScrollerBubblePolicy.minFlickDistancePx(density)
+        val fastFlick = mVelocityPxPerSecond >=
+                viewport * FastScrollerBubblePolicy.VELOCITY_TRIGGER_SCREENS_PER_SEC
+        if (mGestureDistancePx >= distanceTriggerPx ||
+            (fastFlick && mGestureDistancePx >= flickTriggerPx)
+        ) {
+            mBubbleShownInGesture = true
+            handler.removeCallbacks(mBubbleHider)
+            showBubble()
+        }
+    }
+
+    /**
+     * 手指离开后：整段手势（拖动 + fling）滑过一屏才补弹气泡，
+     * 弹出后保留 [FastScrollerBubblePolicy.SETTLE_HOLD_MS] 再淡出，方便顺手去抓。
+     */
+    private fun settleGesture() {
+        if (!mShowBubble) {
+            return
+        }
+        val viewport = mViewHeight
+        if (!mBubbleShownInGesture && viewport > 0 &&
+            mGestureDistancePx >= viewport * FastScrollerBubblePolicy.SETTLE_TRIGGER_SCREENS &&
+            hasEnoughContentForBubble(mRecyclerView)
+        ) {
+            mBubbleShownInGesture = true
+            showBubble()
+        }
+        if (isViewVisible(mBubbleView)) {
+            handler.removeCallbacks(mBubbleHider)
+            handler.postDelayed(mBubbleHider, FastScrollerBubblePolicy.SETTLE_HOLD_MS)
+        }
+    }
+
+    /**
+     * 短列表用不上定位气泡：至少要有 3 屏内容。
+     */
+    private fun hasEnoughContentForBubble(recyclerView: RecyclerView?): Boolean {
+        recyclerView ?: return false
+        val visibleCount = recyclerView.childCount
+        val itemCount = recyclerView.adapter?.itemCount ?: 0
+        if (visibleCount > 0 && itemCount > 0) {
+            return FastScrollerBubblePolicy.hasEnoughContentByCount(visibleCount, itemCount)
+        }
+        val viewport = recyclerView.height
+        return FastScrollerBubblePolicy.hasEnoughContent(
+            recyclerView.computeVerticalScrollRange() - viewport,
+            viewport
+        )
     }
 
     private fun setRecyclerViewPosition(y: Float) {
@@ -359,11 +513,6 @@ class FastScroller : LinearLayout {
             }
             val targetPos = getValueInRange(0, itemCount - 1, scrolledItemCount)
             mRecyclerView?.layoutManager?.scrollToPosition(targetPos)
-            mSectionIndexer?.let { sectionIndexer ->
-                if (mShowBubble) {
-                    mBubbleView.text = sectionIndexer.getSectionText(targetPos)
-                }
-            }
         }
     }
 
@@ -384,14 +533,14 @@ class FastScroller : LinearLayout {
     private fun setViewPositions(y: Float) {
         mBubbleHeight = mBubbleView.height
         mHandleHeight = mHandleView.height
-        val bubbleY = getValueInRange(
-            0,
-            mViewHeight - mBubbleHeight - mHandleHeight / 2,
-            (y - mBubbleHeight).toInt()
-        )
         val handleY =
             getValueInRange(0, mViewHeight - mHandleHeight, (y - mHandleHeight / 2).toInt())
         if (mShowBubble) {
+            val bubbleY = getValueInRange(
+                0,
+                (mViewHeight - mBubbleHeight).coerceAtLeast(0),
+                (y - mBubbleHeight / 2).toInt()
+            )
             mBubbleView.y = bubbleY.toFloat()
         }
         mHandleView.y = handleY.toFloat()
@@ -423,32 +572,74 @@ class FastScroller : LinearLayout {
         animator?.cancel()
     }
 
+    /** 气泡从滚动条里「挤出来」的初始横向偏移。 */
+    private fun bubblePopOffset(): Float = (mBubbleHeight * 0.9f).coerceAtLeast(1f)
+
     private fun showBubble() {
+        if (!mShowBubble) {
+            return
+        }
+        applyBubbleMetrics()
+        // 取消还没跑完的淡出，避免它的 onAnimationCancel 把气泡改成 GONE
+        mBubbleAnimator?.setListener(null)
+        mBubbleAnimator?.cancel()
+        mBubbleAnimator = null
         if (!isViewVisible(mBubbleView)) {
             mBubbleView.visibility = View.VISIBLE
-            mBubbleAnimator = mBubbleView.animate().alpha(1f)
-                .setDuration(sBubbleAnimDuration.toLong())
+            mBubbleView.alpha = 0f
+            // 从滚动条那一侧滑出来
+            mBubbleView.translationX = bubblePopOffset()
+            val bubbleY = (mHandleView.y + mHandleHeight / 2f - mBubbleHeight / 2f)
+                .coerceIn(0f, (mViewHeight - mBubbleHeight).coerceAtLeast(0).toFloat())
+            mBubbleView.y = bubbleY
+            mBubbleAnimator = mBubbleView.animate().alpha(1f).translationX(0f)
+                .setDuration(sBubblePopDuration.toLong())
+                .setInterpolator(OvershootInterpolator(1.3f))
                 .setListener(object : AnimatorListenerAdapter() {
 
                     // adapter required for new alpha value to stick
                 })
+            repositionAfterLayout()
+        } else if (mBubbleView.alpha < 1f || mBubbleView.translationX != 0f) {
+            mBubbleAnimator?.setListener(null)
+            mBubbleAnimator?.cancel()
+            mBubbleAnimator = mBubbleView.animate().alpha(1f).translationX(0f)
+                .setDuration(sBubbleAnimDuration.toLong())
+        }
+    }
+
+    /**
+     * 气泡显示/隐藏会触发重新布局，FrameLayout 会把 handle 的 y 重置为 0，
+     * 这里在下一帧按滚动比例重新摆一次，避免滑块跳到顶部。
+     */
+    private fun repositionAfterLayout() {
+        post {
+            if (mHandleView.isSelected) {
+                return@post
+            }
+            mBubbleHeight = mBubbleView.height
+            mHandleHeight = mHandleView.height
+            setViewPositions(getScrollProportion(mRecyclerView))
         }
     }
 
     private fun hideBubble() {
         if (isViewVisible(mBubbleView)) {
+            mBubbleAnimator?.setListener(null)
+            mBubbleAnimator?.cancel()
             mBubbleAnimator = mBubbleView.animate().alpha(0f)
-                .setDuration(sBubbleAnimDuration.toLong())
+                .translationX(bubblePopOffset())
+                .setDuration(sBubbleHideDuration.toLong())
                 .setListener(object : AnimatorListenerAdapter() {
                     override fun onAnimationEnd(animation: Animator) {
                         super.onAnimationEnd(animation)
-                        mBubbleView.visibility = View.INVISIBLE
+                        mBubbleView.visibility = View.GONE
                         mBubbleAnimator = null
                     }
 
                     override fun onAnimationCancel(animation: Animator) {
                         super.onAnimationCancel(animation)
-                        mBubbleView.visibility = View.INVISIBLE
+                        mBubbleView.visibility = View.GONE
                         mBubbleAnimator = null
                     }
                 })
@@ -458,7 +649,7 @@ class FastScroller : LinearLayout {
     private fun showScrollbar() {
         mRecyclerView?.let { mRecyclerView ->
             if (mRecyclerView.computeVerticalScrollRange() - mViewHeight > 0) {
-                applyTouchTargetWidth()
+                applyBubbleMetrics()
                 val transX =
                     resources.getDimensionPixelSize(R.dimen.fastscroll_scrollbar_padding_end)
                         .toFloat()
@@ -510,10 +701,8 @@ class FastScroller : LinearLayout {
         @ColorInt var bubbleColor = ColorUtils.adjustAlpha(context.accentColor, 0.8f)
         @ColorInt var handleColor = context.accentColor
         @ColorInt var trackColor = context.getCompatColor(R.color.transparent30)
-        @ColorInt var textColor =
-            if (ColorUtils.isColorLight(bubbleColor)) Color.BLACK else Color.WHITE
         var fadeScrollbar = true
-        var showBubble = false
+        var showBubble = true
         var showTrack = true
         if (attrs != null) {
             val typedArray = context.obtainStyledAttributes(attrs, R.styleable.FastScroller, 0, 0)
@@ -521,7 +710,6 @@ class FastScroller : LinearLayout {
                 bubbleColor = typedArray.getColor(R.styleable.FastScroller_bubbleColor, bubbleColor)
                 handleColor = typedArray.getColor(R.styleable.FastScroller_handleColor, handleColor)
                 trackColor = typedArray.getColor(R.styleable.FastScroller_trackColor, trackColor)
-                textColor = typedArray.getColor(R.styleable.FastScroller_bubbleTextColor, textColor)
                 fadeScrollbar =
                     typedArray.getBoolean(R.styleable.FastScroller_fadeScrollbar, fadeScrollbar)
                 showBubble = typedArray.getBoolean(R.styleable.FastScroller_showBubble, showBubble)
@@ -533,29 +721,34 @@ class FastScroller : LinearLayout {
         setTrackColor(trackColor)
         setHandleColor(handleColor)
         setBubbleColor(bubbleColor)
-        setBubbleTextColor(textColor)
         setFadeScrollbar(fadeScrollbar)
         setBubbleVisible(showBubble)
         setTrackVisible(showTrack)
-        applyTouchTargetWidth()
+        applyBubbleMetrics()
     }
 
-    private fun applyTouchTargetWidth() {
-        val targetWidth = TypedValue.applyDimension(
-            TypedValue.COMPLEX_UNIT_DIP,
-            AppConfig.fastScrollerTouchTargetDp.toFloat(),
-            resources.displayMetrics
-        ).roundToInt()
-        val handleWidth = resources.getDimensionPixelSize(R.dimen.fastscroll_handle_width)
-        val sidePadding = max(0, (targetWidth - handleWidth) / 2)
-        ViewCompat.setPaddingRelative(
-            mHandleView,
-            sidePadding,
-            mHandleView.paddingTop,
-            sidePadding,
-            mHandleView.paddingBottom
-        )
-        mScrollbar.minimumWidth = targetWidth
+    /**
+     * 气泡手柄大小，跟随「我的-其他设置-快速滚动条气泡大小」的 5 档预设。
+     */
+    private fun applyBubbleMetrics() {
+        val bubbleHeight = (AppConfig.fastScrollerBubbleSizeDp * resources.displayMetrics.density)
+            .roundToInt()
+        val bubbleWidth = (bubbleHeight * 1.5f).roundToInt()
+        val layoutParams = mBubbleView.layoutParams
+        if (layoutParams == null) {
+            mBubbleView.layoutParams = LayoutParams(bubbleWidth, bubbleHeight).apply {
+                gravity = Gravity.END
+            }
+        } else if (layoutParams.width != bubbleWidth || layoutParams.height != bubbleHeight) {
+            layoutParams.width = bubbleWidth
+            layoutParams.height = bubbleHeight
+            mBubbleView.layoutParams = layoutParams
+        }
+        mBubbleHeight = bubbleHeight
+        val stripWidth = resources.getDimensionPixelSize(R.dimen.fastscroll_scrollbar_padding_start) +
+                resources.getDimensionPixelSize(R.dimen.fastscroll_scrollbar_padding_end) +
+                resources.getDimensionPixelSize(R.dimen.fastscroll_handle_width)
+        mScrollbar.minimumWidth = stripWidth
     }
 
     interface SectionIndexer {
@@ -563,7 +756,9 @@ class FastScroller : LinearLayout {
     }
 
     companion object {
-        private const val sBubbleAnimDuration = 100
+        private const val sBubbleAnimDuration = 120
+        private const val sBubblePopDuration = 220
+        private const val sBubbleHideDuration = 140
         private const val sScrollbarAnimDuration = 300
         private const val sScrollbarHideDelay = 1000
         private const val sTrackSnapRange = 5

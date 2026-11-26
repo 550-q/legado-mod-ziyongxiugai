@@ -3,19 +3,13 @@
 <merge xmlns:android="http://schemas.android.com/apk/res/android"
     xmlns:tools="http://schemas.android.com/tools">
 
-    <TextView
+    <io.legado.app.ui.widget.recycler.scroller.FastScrollBubble
         android:id="@+id/fastscroll_bubble"
         android:layout_width="wrap_content"
         android:layout_height="wrap_content"
         android:layout_gravity="end"
-        android:gravity="center"
-        android:maxLines="1"
-        android:textSize="@dimen/fastscroll_bubble_textsize"
         android:visibility="gone"
-        tools:background="@drawable/fastscroll_bubble"
-        tools:text="A"
-        tools:textColor="#ffffff"
-        tools:visibility="visible" />
+        tools:ignore="ContentDescription" />
 
     <FrameLayout
         android:id="@+id/fastscroll_scrollbar"

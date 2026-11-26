@@ -175,11 +175,11 @@ class OtherConfigFragment : ComposeSettingFragment() {
                 }
             ),
             intChoice(
-                key = PreferKey.fastScrollerTouchTargetDp,
-                title = getString(R.string.fast_scroller_touch_target),
-                entriesRes = R.array.fast_scroller_touch_target_entries,
-                valuesRes = R.array.fast_scroller_touch_target_values,
-                defaultValue = AppConfig.DEFAULT_FAST_SCROLLER_TOUCH_TARGET_DP
+                key = PreferKey.fastScrollerBubbleSize,
+                title = getString(R.string.fast_scroller_bubble_size),
+                entriesRes = R.array.fast_scroller_bubble_size_entries,
+                valuesRes = R.array.fast_scroller_bubble_size_values,
+                defaultValue = AppConfig.DEFAULT_FAST_SCROLLER_BUBBLE_SIZE
             ),
             choice(
                 key = PreferKey.epubReadEngine,

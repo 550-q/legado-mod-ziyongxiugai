@@ -70,6 +70,7 @@ import androidx.compose.ui.unit.sp
 import androidx.compose.ui.viewinterop.AndroidView
 import io.legado.app.R
 import io.legado.app.help.config.AppConfig
+import io.legado.app.help.config.FastScrollerConfig
 import io.legado.app.lib.theme.UiCorner
 import io.legado.app.lib.theme.accentColor
 import io.legado.app.lib.theme.backgroundColor
@@ -228,7 +229,7 @@ fun AppManagementLazyColumn(
     content: LazyListScope.() -> Unit
 ) {
     val fastScrollerSpace = if (showFastScroller && reserveFastScrollerSpace) {
-        AppConfig.fastScrollerTouchTargetDp.dp
+        FastScrollerConfig.bubbleSizeDp.dp
     } else {
         0.dp
     }
@@ -250,8 +251,7 @@ fun AppManagementLazyColumn(
         ComposeLazyListFastScroller(
             state = state,
             enabled = showFastScroller,
-            modifier = Modifier.align(Alignment.CenterEnd),
-            touchTargetWidth = AppConfig.fastScrollerTouchTargetDp.dp
+            modifier = Modifier.align(Alignment.CenterEnd)
         )
     }
 }
