@@ -12,7 +12,7 @@ on:
         required: false
         default: ""
       version_code:
-        description: "versionCode；留空则由构建时间自动生成（Unix 分钟数，永远递增、无需手动维护）"
+        description: "versionCode；留空自动生成（Unix 分钟数+10000000，递增且大于 35500036）"
         required: false
         default: ""
       abi:
@@ -59,8 +59,9 @@ jobs:
           fi
           CODE="${{ inputs.version_code }}"
           if [ -z "$CODE" ]; then
-            # 自动版本号：Unix 时间戳的分钟数，单调递增，8 位，不会和已装版本冲突
-            CODE=$(( $(date -u +%s) / 60 ))
+            # 自动版本号：Unix 分钟数 + 10000000。加偏移是因为历史版本用 35500036 这类高位
+            # 数字，直接用时间戳（约 2990 万）会小于已装版本，手机会拒绝降级安装。
+            CODE=$(( $(date -u +%s) / 60 + 10000000 ))
           fi
           echo "name=$NAME" >> "$GITHUB_OUTPUT"
           echo "code=$CODE" >> "$GITHUB_OUTPUT"
