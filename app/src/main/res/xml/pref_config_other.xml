@@ -61,13 +61,13 @@
             app:iconSpaceReserved="false" />
 
         <io.legado.app.lib.prefs.NameListPreference
-            android:defaultValue="44"
-            android:key="fastScrollerTouchTargetDp"
-            android:title="@string/fast_scroller_touch_target"
+            android:defaultValue="2"
+            android:key="fastScrollerBubbleSize"
+            android:title="@string/fast_scroller_bubble_size"
             app:allowDividerAbove="false"
             app:allowDividerBelow="false"
-            app:entries="@array/fast_scroller_touch_target_entries"
-            app:entryValues="@array/fast_scroller_touch_target_values"
+            app:entries="@array/fast_scroller_bubble_size_entries"
+            app:entryValues="@array/fast_scroller_bubble_size_values"
             app:iconSpaceReserved="false" />
 
         <io.legado.app.lib.prefs.NameListPreference
