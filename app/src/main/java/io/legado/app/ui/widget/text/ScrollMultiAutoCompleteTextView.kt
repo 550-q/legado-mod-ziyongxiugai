@@ -25,6 +25,8 @@ open class ScrollMultiAutoCompleteTextView @JvmOverloads constructor(
     attrs: AttributeSet? = null
 ) : AppCompatMultiAutoCompleteTextView(context, attrs) {
 
+    private val selectionMagnifier by lazy { SelectionMagnifierTouchHandler(this) }
+
     //是否到顶或者到底的标志
     private var disallowIntercept = true
 
@@ -156,6 +158,9 @@ open class ScrollMultiAutoCompleteTextView @JvmOverloads constructor(
 
     @SuppressLint("ClickableViewAccessibility")
     override fun onTouchEvent(event: MotionEvent): Boolean {
+        if (selectionMagnifier.onTouchEvent(event)) {
+            return true
+        }
         val result = super.onTouchEvent(event)
         //如果是需要拦截，则再拦截，这个方法会在onScrollChanged方法之后再调用一次
         if (disallowIntercept && lineCount > maxLines) {

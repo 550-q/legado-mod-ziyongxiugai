@@ -8,6 +8,8 @@ import android.content.pm.ResolveInfo
 import android.graphics.Color
 import android.graphics.drawable.ColorDrawable
 import android.net.Uri
+import android.os.Handler
+import android.os.Looper
 import android.os.Build
 import android.text.TextPaint
 import android.view.Gravity
@@ -82,15 +84,14 @@ class TextActionMenu(private val context: Context, private val callBack: CallBac
 
     private val composeView = ComposeView(context)
     private val allMenuItems: List<MenuItemImpl>
-    private var menuActions by mutableStateOf<List<TextMenuAction>>(emptyList())
+    private var processTextMenuItems: List<MenuItemImpl> = emptyList()
+    private var menuPages by mutableStateOf<List<MenuPage>>(emptyList())
     private var popupWidthPx by mutableIntStateOf(1)
     private var popupHeightPx by mutableIntStateOf(1)
-    private var columns by mutableIntStateOf(1)
-    private var rows by mutableIntStateOf(1)
-    private var itemWidthPx by mutableIntStateOf(64.dpToPx())
-    private var pageCapacity by mutableIntStateOf(1)
+    private var rowCount by mutableIntStateOf(1)
     private var lastMaxMainWidth = 0
     private var overlayParent: ViewGroup? = null
+    private val mainHandler = Handler(Looper.getMainLooper())
     private val itemTextPaint = TextPaint().apply {
         textSize = 12f * context.resources.displayMetrics.scaledDensity
         typeface = context.uiTypeface()
@@ -113,40 +114,32 @@ class TextActionMenu(private val context: Context, private val callBack: CallBac
         }
 
         val myMenu = MenuBuilder(context)
-        val otherMenu = MenuBuilder(context)
         SupportMenuInflater(context).inflate(R.menu.content_select_action, myMenu)
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
-            onInitializeMenu(otherMenu)
-        }
-        allMenuItems = myMenu.visibleItems + otherMenu.visibleItems
+        allMenuItems = myMenu.visibleItems
 
         composeView.setViewCompositionStrategy(ViewCompositionStrategy.DisposeOnDetachedFromWindow)
         composeView.setContent {
             LegadoComposeTheme {
                 TextActionMenuContent(
-                    actions = menuActions,
+                    pages = menuPages,
                     popupWidthPx = popupWidthPx,
                     popupHeightPx = popupHeightPx,
-                    columns = columns,
-                    rows = rows,
-                    pageCapacity = pageCapacity,
-                    itemWidthPx = itemWidthPx,
+                    rowCount = rowCount,
                     onActionClick = { action ->
-                        try {
-                            if (!callBack.onMenuItemSelected(action.itemId)) {
-                                onMenuItemSelected(action)
-                            }
-                        } catch (error: Exception) {
-                            // Multi-page selections can exceed an external app's Binder or
-                            // clipboard limit. The reader must remain usable if it refuses.
-                            AppLog.putDebug("Reader selection action failed", error)
-                            context.toastOnUi("文字操作失败，请缩小选区后重试")
-                        } finally {
-                            callBack.onMenuActionFinally()
-                        }
+                        runMenuAction { handleActionClick(action) }
                     },
                     onActionLongClick = { action ->
-                        if (action.itemId == R.id.menu_aloud) toggleSpeakMode()
+                        when (action.itemId) {
+                            R.id.menu_aloud -> {
+                                toggleSpeakMode()
+                                refreshMenuTitles()
+                            }
+                            R.id.menu_web_search -> runMenuAction {
+                                if (!callBack.onMenuItemSelected(R.id.menu_web_search)) {
+                                    onMenuItemSelected(action)
+                                }
+                            }
+                        }
                     }
                 )
             }
@@ -168,7 +161,17 @@ class TextActionMenu(private val context: Context, private val callBack: CallBac
     }
 
     private fun filteredMenuActions(): List<TextMenuAction> {
-        return allMenuItems.mapNotNull { item ->
+        val actions = (allMenuItems + processTextMenuItems).mapNotNull { item ->
+            val processTextActionId = ContentSelectConfig.processTextActionId(item.intent)
+            if (processTextActionId != null) {
+                if (!configuredActionIds.contains(processTextActionId)) return@mapNotNull null
+                return@mapNotNull TextMenuAction(
+                    itemId = item.itemId,
+                    actionId = processTextActionId,
+                    title = item.title?.toString().orEmpty(),
+                    intent = item.intent
+                )
+            }
             val actionId = menuItemToActionId(item.itemId) ?: return@mapNotNull null
             if (!configuredActionIds.contains(actionId)) return@mapNotNull null
             if (actionId == ContentSelectConfig.ACTION_REPLACE && !callBack.supportsReplaceRules()) {
@@ -177,20 +180,97 @@ class TextActionMenu(private val context: Context, private val callBack: CallBac
             TextMenuAction(
                 itemId = item.itemId,
                 actionId = actionId,
-                title = if (item.itemId == R.id.menu_aloud &&
-                    (BaseReadAloudService.isRun || AppConfig.contentSelectSpeakMod == 1)
-                ) {
-                    context.getString(R.string.read_aloud_from_here)
+                title = if (item.itemId == R.id.menu_aloud) {
+                    if (BaseReadAloudService.isRun || AppConfig.contentSelectSpeakMod == 1) {
+                        context.getString(R.string.read_aloud_from_here)
+                    } else {
+                        context.getString(R.string.read_aloud_selected)
+                    }
                 } else {
                     item.title?.toString().orEmpty()
                 },
                 intent = item.intent
             )
         }
+        // 用户可在“正文长按条编辑”里长按勾选框拖动排序，这里按保存的顺序显示。
+        val order = ContentSelectConfig.actionOrder(context)
+        if (order.isEmpty()) return actions
+        val index = order.withIndex().associate { it.value to it.index }
+        return actions.sortedBy { index[it.actionId] ?: Int.MAX_VALUE }
+    }
+
+    /**
+     * 「搜索」短按 = 当前书籍全文搜索（和阅读菜单里的搜索同一入口），
+     * 网页搜索改为长按触发。
+     */
+    private fun handleActionClick(action: TextMenuAction) {
+        val itemId = if (action.itemId == R.id.menu_web_search &&
+            callBack.supportsContentSearch()
+        ) {
+            R.id.menu_search_content
+        } else {
+            action.itemId
+        }
+        if (!callBack.onMenuItemSelected(itemId)) {
+            onMenuItemSelected(action)
+        }
+    }
+
+    private fun runMenuAction(block: () -> Unit) {
+        try {
+            block()
+        } catch (error: Exception) {
+            // Multi-page selections can exceed an external app's Binder or
+            // clipboard limit. The reader must remain usable if it refuses.
+            AppLog.putDebug("Reader selection action failed", error)
+            context.toastOnUi("文字操作失败，请缩小选区后重试")
+        } finally {
+            // 长按回调还在 Compose 手势分发过程中，此时同步 removeView 会让
+            // 手势协程被再次 resume，抛 "Already resumed" 直接崩溃。
+            // 延后到下一轮主线程消息再收起菜单。
+            mainHandler.post {
+                if (overlayParent != null || isShowing) {
+                    callBack.onMenuActionFinally()
+                }
+            }
+        }
     }
 
     fun upMenu() {
+        refreshProcessTextMenuItems()
         upMenuForWidth(lastMaxMainWidth.takeIf { it > 0 } ?: context.resources.displayMetrics.widthPixels)
+    }
+
+    /**
+     * 重新枚举系统「文字处理」动作，这样新装的翻译 / 记事本等应用
+     * 在保存长按条配置后无需重启阅读页即可出现。
+     */
+    private fun refreshProcessTextMenuItems() {
+        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.M) {
+            processTextMenuItems = emptyList()
+            return
+        }
+        val otherMenu = MenuBuilder(context)
+        onInitializeMenu(otherMenu)
+        processTextMenuItems = otherMenu.visibleItems
+    }
+
+    /**
+     * 长按「朗读」切换模式后只刷新标题，不动菜单尺寸和位置。
+     */
+    private fun refreshMenuTitles() {
+        val titles = filteredMenuActions().associateBy { it.actionId }
+        menuPages = menuPages.map { page ->
+            MenuPage(
+                page.rows.map { row ->
+                    MenuRow(
+                        row.cells.map { cell ->
+                            cell.copy(action = titles[cell.action.actionId] ?: cell.action)
+                        }
+                    )
+                }
+            )
+        }
     }
 
     private fun upMenuForWidth(maxMainWidth: Int) {
@@ -198,64 +278,110 @@ class TextActionMenu(private val context: Context, private val callBack: CallBac
         val actions = filteredMenuActions()
         val maxWidth = (maxMainWidth - 16.dpToPx()).coerceAtLeast(140.dpToPx())
         val layout = calculateLayout(actions, maxWidth)
-        menuActions = actions
-        columns = layout.columns
-        rows = layout.rows
-        itemWidthPx = layout.itemWidth
-        pageCapacity = layout.capacity
+        rowCount = layout.rows
         popupWidthPx = layout.width
         popupHeightPx = layout.height
         width = layout.width
         height = layout.height
         composeView.layoutParams = ViewGroup.LayoutParams(layout.width, layout.height)
+        menuPages = layout.pages
     }
 
     private fun calculateLayout(actions: List<TextMenuAction>, maxWidth: Int): MenuLayout {
-        val safeCount = actions.size.coerceAtLeast(1)
-        val columns = when {
-            safeCount <= 2 -> safeCount
-            safeCount <= 4 -> safeCount
+        val hPadding = horizontalPaddingPx()
+        val rowAreaLimit = (maxWidth - hPadding).coerceAtLeast(minItemWidthPx())
+        // 每格宽度跟随标题长度，长名字（如“问问 DeepSeek”）不再被压成“问…”。
+        val chipWidths = actions.associateWith {
+            estimateItemWidth(it).coerceIn(minItemWidthPx(), rowAreaLimit)
+        }
+        val widestItem = chipWidths.values.maxOrNull() ?: minItemWidthPx()
+        // 主框大小沿用上一版（按最长标题 × 列数），只是格子不再统一宽度。
+        val maxColumns = when {
+            actions.size <= 2 -> actions.size.coerceAtLeast(1)
+            actions.size <= 4 -> actions.size
             else -> 4
-        }.coerceAtMost((maxWidth - horizontalPaddingPx()) / minItemWidthPx()).coerceAtLeast(1)
-        val needsPages = safeCount > columns * 2
-        val rows = if (needsPages) 2 else ceil(safeCount / columns.toFloat()).toInt().coerceIn(1, 2)
-        val capacity = (columns * 2).coerceAtLeast(1)
-        val itemWidth = actions
-            .take(capacity)
-            .maxOfOrNull(::estimateItemWidth)
-            ?.coerceIn(minItemWidthPx(), maxItemWidthPx())
-            ?: minItemWidthPx()
-        val menuWidth = (itemWidth * columns + horizontalPaddingPx())
+        }
+        val fitColumns = (rowAreaLimit / widestItem).coerceAtLeast(1)
+        val columns = maxColumns.coerceAtMost(fitColumns)
+        val menuWidth = (widestItem * columns + hPadding)
             .coerceAtMost(maxWidth)
-            .coerceAtLeast(minItemWidthPx() + horizontalPaddingPx())
-        val menuHeight = rows * itemHeightPx() + verticalPaddingPx() +
-            if (actions.size > capacity) indicatorHeightPx() else 0
+            .coerceAtLeast(minItemWidthPx() + hPadding)
+        val pages = buildPages(actions, chipWidths, menuWidth - hPadding)
+        val rows = pages.maxOfOrNull { it.rows.size }?.coerceIn(1, 2) ?: 1
+        val menuHeight = rows * rowHeightPx() + verticalPaddingPx() * 2 +
+            if (pages.size > 1) indicatorHeightPx() + indicatorSpacingPx() else 0
         return MenuLayout(
-            columns = columns,
             rows = rows,
-            capacity = capacity,
-            itemWidth = ((menuWidth - horizontalPaddingPx()) / columns).coerceAtLeast(minItemWidthPx()),
             width = menuWidth,
-            height = menuHeight
+            height = menuHeight,
+            pages = pages
         )
+    }
+
+    /**
+     * 把各格按实际宽度排进最多两行一页，宽度不够就换行、换页。
+     */
+    private fun buildPages(
+        actions: List<TextMenuAction>,
+        chipWidths: Map<TextMenuAction, Int>,
+        rowAreaWidth: Int
+    ): List<MenuPage> {
+        val gap = chipGapPx()
+        val pages = mutableListOf<MenuPage>()
+        var rows = mutableListOf<MenuRow>()
+        var cells = mutableListOf<MenuCell>()
+        var used = 0
+        fun flushRow() {
+            if (cells.isNotEmpty()) {
+                rows.add(MenuRow(cells))
+                cells = mutableListOf()
+                used = 0
+            }
+        }
+        fun flushPage() {
+            flushRow()
+            if (rows.isNotEmpty()) {
+                pages.add(MenuPage(rows))
+                rows = mutableListOf()
+            }
+        }
+        for (action in actions) {
+            val width = chipWidths[action] ?: minItemWidthPx()
+            if (rows.size >= 2) flushPage()
+            if (cells.isNotEmpty() && used + gap + width > rowAreaWidth) {
+                flushRow()
+            }
+            if (rows.size >= 2) flushPage()
+            used += if (cells.isEmpty()) width else width + gap
+            cells.add(MenuCell(action, width))
+        }
+        flushPage()
+        if (pages.isEmpty()) {
+            pages.add(MenuPage(emptyList()))
+        }
+        return pages
     }
 
     private fun estimateItemWidth(action: TextMenuAction): Int {
         val textWidth = ceil(itemTextPaint.measureText(action.title)).toInt()
-        return textWidth + 24.dpToPx()
+        return textWidth + 30.dpToPx()
     }
 
-    private fun minItemWidthPx(): Int = 56.dpToPx()
+    private fun minItemWidthPx(): Int = 64.dpToPx()
 
-    private fun maxItemWidthPx(): Int = 112.dpToPx()
+    private fun itemHeightPx(): Int = 36.dpToPx()
 
-    private fun itemHeightPx(): Int = 40.dpToPx()
+    private fun rowHeightPx(): Int = itemHeightPx() + chipGapPx()
+
+    private fun chipGapPx(): Int = 6.dpToPx()
 
     private fun horizontalPaddingPx(): Int = 12.dpToPx()
 
-    private fun verticalPaddingPx(): Int = 12.dpToPx()
+    private fun verticalPaddingPx(): Int = 8.dpToPx()
 
-    private fun indicatorHeightPx(): Int = 16.dpToPx()
+    private fun indicatorHeightPx(): Int = 6.dpToPx()
+
+    private fun indicatorSpacingPx(): Int = 4.dpToPx()
 
     fun show(
         view: View,
@@ -271,10 +397,7 @@ class TextActionMenu(private val context: Context, private val callBack: CallBac
         if (defaultActionId.isNotEmpty() && configuredActionIds.contains(defaultActionId)) {
             val defaultItem = filteredMenuActions().firstOrNull { it.actionId == defaultActionId }
             if (defaultItem != null) {
-                if (!callBack.onMenuItemSelected(defaultItem.itemId)) {
-                    onMenuItemSelected(defaultItem)
-                }
-                callBack.onMenuActionFinally()
+                runMenuAction { handleActionClick(defaultItem) }
                 return
             }
         }
@@ -410,18 +533,21 @@ class TextActionMenu(private val context: Context, private val callBack: CallBac
 
         fun supportsReplaceRules(): Boolean = true
 
+        /**
+         * 当前书籍是否支持全文搜索（EPUB 直读模式不支持，此时「搜索」仍是网页搜索）
+         */
+        fun supportsContentSearch(): Boolean = true
+
         fun onMenuItemSelected(itemId: Int): Boolean
 
         fun onMenuActionFinally()
     }
 
     private data class MenuLayout(
-        val columns: Int,
         val rows: Int,
-        val capacity: Int,
-        val itemWidth: Int,
         val width: Int,
-        val height: Int
+        val height: Int,
+        val pages: List<MenuPage>
     )
 }
 
@@ -432,33 +558,42 @@ private data class TextMenuAction(
     val intent: Intent?
 )
 
-@OptIn(ExperimentalFoundationApi::class)
+private data class MenuCell(
+    val action: TextMenuAction,
+    val width: Int
+)
+
+private data class MenuRow(
+    val cells: List<MenuCell>
+)
+
+private data class MenuPage(
+    val rows: List<MenuRow>
+)
+
 @Composable
 private fun TextActionMenuContent(
-    actions: List<TextMenuAction>,
+    pages: List<MenuPage>,
     popupWidthPx: Int,
     popupHeightPx: Int,
-    columns: Int,
-    rows: Int,
-    pageCapacity: Int,
-    itemWidthPx: Int,
+    rowCount: Int,
     onActionClick: (TextMenuAction) -> Unit,
     onActionLongClick: (TextMenuAction) -> Unit
 ) {
     val style = rememberAppDialogStyle()
     val density = LocalDensity.current
-    val pages = actions.chunked(pageCapacity.coerceAtLeast(1)).ifEmpty { listOf(emptyList()) }
-    val pagerState = rememberPagerState(pageCount = { pages.size })
-    LaunchedEffect(pages.size) {
-        val target = pagerState.currentPage.coerceAtMost((pages.size - 1).coerceAtLeast(0))
+    val pageCount = pages.size.coerceAtLeast(1)
+    val pagerState = rememberPagerState(pageCount = { pageCount })
+    LaunchedEffect(pageCount) {
+        val target = pagerState.currentPage.coerceAtMost(pageCount - 1)
         if (target != pagerState.currentPage) {
             pagerState.scrollToPage(target)
         }
     }
     val widthDp = with(density) { popupWidthPx.toDp() }
     val heightDp = with(density) { popupHeightPx.toDp() }
-    val itemWidthDp = with(density) { itemWidthPx.toDp() }
-    val itemHeight = 34.dp
+    val itemHeight = 36.dp
+    val pageHeight = with(density) { (rowCount.coerceIn(1, 2) * 42.dpToPx()).toDp() }
     val shape = RoundedCornerShape(style.panelRadius)
 
     Column(
@@ -469,59 +604,49 @@ private fun TextActionMenuContent(
             .clip(shape)
             .background(style.surface)
             .border(1.dp, style.stroke, shape)
-            .padding(horizontal = 6.dp, vertical = 6.dp),
+            .padding(horizontal = 6.dp, vertical = 8.dp),
         horizontalAlignment = Alignment.CenterHorizontally
     ) {
         HorizontalPager(
             state = pagerState,
             modifier = Modifier
                 .width(widthDp - 12.dp)
-                .height((rows * 40).dp)
-        ) { page ->
-            val pageItems = pages[page]
+                .height(pageHeight)
+        ) { pageIndex ->
+            val page = pages.getOrNull(pageIndex) ?: MenuPage(emptyList())
             Column(
                 modifier = Modifier.width(widthDp - 12.dp),
                 verticalArrangement = Arrangement.spacedBy(6.dp),
                 horizontalAlignment = Alignment.CenterHorizontally
             ) {
-                repeat(rows) { rowIndex ->
+                page.rows.forEach { row ->
                     Row(
-                        horizontalArrangement = Arrangement.spacedBy(0.dp),
+                        horizontalArrangement = Arrangement.spacedBy(6.dp),
                         verticalAlignment = Alignment.CenterVertically
                     ) {
-                        repeat(columns) { columnIndex ->
-                            val itemIndex = rowIndex * columns + columnIndex
-                            val action = pageItems.getOrNull(itemIndex)
-                            if (action == null) {
-                                Spacer(
-                                    modifier = Modifier
-                                        .width(itemWidthDp)
-                                        .height(itemHeight)
-                                )
-                            } else {
-                                TextActionChip(
-                                    action = action,
-                                    width = itemWidthDp,
-                                    height = itemHeight,
-                                    textColor = style.primaryText,
-                                    background = style.fieldSurface,
-                                    accent = style.accent,
-                                    onClick = { onActionClick(action) },
-                                    onLongClick = { onActionLongClick(action) }
-                                )
-                            }
+                        row.cells.forEach { cell ->
+                            TextActionChip(
+                                action = cell.action,
+                                width = with(density) { cell.width.toDp() },
+                                height = itemHeight,
+                                textColor = style.primaryText,
+                                background = style.fieldSurface,
+                                accent = style.accent,
+                                onClick = { onActionClick(cell.action) },
+                                onLongClick = { onActionLongClick(cell.action) }
+                            )
                         }
                     }
                 }
             }
         }
-        if (pages.size > 1) {
+        if (pageCount > 1) {
             Spacer(modifier = Modifier.height(4.dp))
             Row(
                 horizontalArrangement = Arrangement.spacedBy(5.dp),
                 verticalAlignment = Alignment.CenterVertically
             ) {
-                repeat(pages.size) { index ->
+                repeat(pageCount) { index ->
                     val selected = pagerState.currentPage == index
                     Box(
                         modifier = Modifier
@@ -570,7 +695,7 @@ private fun TextActionChip(
             overflow = TextOverflow.Ellipsis,
             textAlign = TextAlign.Center,
             style = MaterialTheme.typography.labelMedium,
-            modifier = Modifier.widthIn(max = width - 16.dp)
+            modifier = Modifier.widthIn(max = width - 22.dp)
         )
     }
 }

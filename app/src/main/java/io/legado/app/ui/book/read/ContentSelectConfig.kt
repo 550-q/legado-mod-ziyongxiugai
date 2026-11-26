@@ -1,6 +1,8 @@
 package io.legado.app.ui.book.read
 
 import android.content.Context
+import android.content.Intent
+import android.os.Build
 import io.legado.app.constant.PreferKey
 import io.legado.app.utils.GSON
 import io.legado.app.utils.getPrefString
@@ -132,6 +134,17 @@ object ContentSelectConfig {
         SearchEngine("google", "Google", "https://www.google.com/search?q={query}", defaultGoogleHideCss)
     )
 
+    fun actionOrder(context: Context): List<String> {
+        return context.getPrefString(PreferKey.contentSelectActionsOrder).orEmpty()
+            .split(',')
+            .map { it.trim() }
+            .filter { it.isNotEmpty() }
+    }
+
+    fun saveActionOrder(context: Context, order: List<String>) {
+        context.putPrefString(PreferKey.contentSelectActionsOrder, order.joinToString(","))
+    }
+
     fun selectedActionIds(context: Context): Set<String> {
         val saved = context.getPrefStringSet(PreferKey.contentSelectActions, null)
             ?.filterNot { it in removedActionIds }
@@ -142,6 +155,43 @@ object ContentSelectConfig {
         } else {
             saved
         }
+    }
+
+    const val PROCESS_TEXT_ACTION_PREFIX = "process_text:"
+
+    /**
+     * 系统「文字处理」动作（ACTION_PROCESS_TEXT），即选中文字后出现在
+     * 系统上下文菜单里的翻译 / 记事本 / 浏览器等应用。
+     */
+    data class ProcessTextAction(
+        val id: String,
+        val label: String
+    )
+
+    fun processTextActions(context: Context): List<ProcessTextAction> {
+        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.M) return emptyList()
+        val intent = Intent(Intent.ACTION_PROCESS_TEXT).apply {
+            type = "text/plain"
+        }
+        return runCatching {
+            context.packageManager.queryIntentActivities(intent, 0)
+                .filter { it.activityInfo?.packageName != context.packageName }
+                .mapNotNull { resolveInfo ->
+                    val activityInfo = resolveInfo.activityInfo ?: return@mapNotNull null
+                    val component = "${activityInfo.packageName}/${activityInfo.name}"
+                    ProcessTextAction(
+                        id = PROCESS_TEXT_ACTION_PREFIX + component,
+                        label = resolveInfo.loadLabel(context.packageManager).toString()
+                    )
+                }
+                .distinctBy { it.id }
+        }.getOrDefault(emptyList())
+    }
+
+    fun processTextActionId(intent: Intent?): String? {
+        if (intent?.action != Intent.ACTION_PROCESS_TEXT) return null
+        val component = intent.component ?: return null
+        return PROCESS_TEXT_ACTION_PREFIX + "${component.packageName}/${component.className}"
     }
 
     fun searchEngines(context: Context): List<SearchEngine> {

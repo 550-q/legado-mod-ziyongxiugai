@@ -3,10 +3,12 @@ package io.legado.app.ui.book.read
 import android.annotation.SuppressLint
 import android.app.Dialog
 import android.content.Context
+import android.content.Intent
 import android.content.res.ColorStateList
 import android.graphics.Color
 import android.graphics.Outline
 import android.graphics.drawable.GradientDrawable
+import android.net.Uri
 import android.os.Build
 import android.os.Bundle
 import android.view.Gravity
@@ -318,16 +320,36 @@ class SelectionWebSearchDialog() : BottomSheetDialogFragment(R.layout.dialog_sel
 
     private fun showMoreMenu() {
         PopupMenu(requireContext(), binding.btnMore, Gravity.NO_GRAVITY).apply {
-            menu.add(0, MENU_REFRESH, 0, R.string.refresh)
-            menu.add(0, MENU_EDIT, 1, R.string.edit)
+            menu.add(0, MENU_OPEN_IN_BROWSER, 0, R.string.open_with_browser)
+            menu.add(0, MENU_REFRESH, 1, R.string.refresh)
+            menu.add(0, MENU_EDIT, 2, R.string.edit)
             setOnMenuItemClickListener {
                 when (it.itemId) {
+                    MENU_OPEN_IN_BROWSER -> openInBrowser()
                     MENU_REFRESH -> webView.reload()
                     MENU_EDIT -> showEngineManageDialog()
                 }
                 true
             }
             show()
+        }
+    }
+
+    /**
+     * 用系统浏览器打开当前页面
+     */
+    private fun openInBrowser() {
+        val url = webView.url?.takeIf { it.isNotBlank() }
+            ?: currentSearchEngine?.let { ContentSelectConfig.buildSearchUrl(it, currentQuery) }
+        if (url.isNullOrBlank()) {
+            requireContext().toastOnUi(R.string.cannot_empty)
+            return
+        }
+        runCatching {
+            startActivity(Intent(Intent.ACTION_VIEW, Uri.parse(url)))
+        }.onFailure {
+            AppLog.putDebug("Open web search page in browser failed: $url", it)
+            requireContext().toastOnUi(it.localizedMessage ?: "ERROR")
         }
     }
 
@@ -619,7 +641,8 @@ class SelectionWebSearchDialog() : BottomSheetDialogFragment(R.layout.dialog_sel
     }
 
     private companion object {
-        const val MENU_REFRESH = 1
-        const val MENU_EDIT = 2
+        const val MENU_OPEN_IN_BROWSER = 1
+        const val MENU_REFRESH = 2
+        const val MENU_EDIT = 3
     }
 }
