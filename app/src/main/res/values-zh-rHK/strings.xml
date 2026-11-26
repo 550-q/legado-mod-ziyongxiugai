@@ -586,6 +586,8 @@
     <string name="select_image">選擇圖片</string>
     <string name="group_manage">分組管理</string>
     <string name="group_select">分組選擇</string>
+    <string name="group_select_new_group">新建分組</string>
+    <string name="group_select_multi_hint">可多選，不選則放入當前所在分組。</string>
     <string name="group_edit">編輯分組</string>
     <string name="move_to_group">移入分組</string>
     <string name="add_group">添加分組</string>

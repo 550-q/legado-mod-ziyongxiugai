@@ -165,6 +165,7 @@ fun AppDialogFrame(
     scrollContent: Boolean = true,
     messageInContent: Boolean = false,
     content: @Composable () -> Unit,
+    startActions: (@Composable () -> Unit)? = null,
     actions: @Composable () -> Unit
 ) {
     val style = rememberAppDialogStyle()
@@ -228,14 +229,26 @@ fun AppDialogFrame(
                     }
                 }
                 Spacer(modifier = Modifier.height(16.dp))
-                Row(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .horizontalScroll(rememberScrollState()),
-                    horizontalArrangement = Arrangement.End,
-                    verticalAlignment = Alignment.CenterVertically
-                ) {
-                    actions()
+                if (startActions == null) {
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .horizontalScroll(rememberScrollState()),
+                        horizontalArrangement = Arrangement.End,
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        actions()
+                    }
+                } else {
+                    // 左侧附加动作 + 右侧取消/确认，两端对齐（左右各自成组，互不挤压）
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        startActions()
+                        Spacer(modifier = Modifier.weight(1f))
+                        actions()
+                    }
                 }
             }
         }

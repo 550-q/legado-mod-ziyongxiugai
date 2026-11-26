@@ -131,7 +131,14 @@ class ImportBookActivity : BaseImportBookActivity<ImportBookViewModel>(),
         val selected = HashSet(adapter.selected)
         if (selected.isEmpty()) return
         pendingImportSelection = selected
-        showDialogFragment(GroupSelectDialog(importGroupId, REQUEST_CODE_IMPORT_GROUP))
+        // 放入书架时的分组弹窗带「可多选」提示，和书籍详情里的分组选择保持同一套布局
+        showDialogFragment(
+            GroupSelectDialog(
+                groupId = importGroupId,
+                requestCode = REQUEST_CODE_IMPORT_GROUP,
+                showMultiHint = true
+            )
+        )
     }
 
     override fun upGroup(requestCode: Int, groupId: Long) {

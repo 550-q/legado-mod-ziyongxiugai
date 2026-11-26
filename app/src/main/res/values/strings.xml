@@ -880,6 +880,8 @@
     <string name="select_image">Select a picture</string>
     <string name="group_manage">Group management</string>
     <string name="group_select">Group selection</string>
+    <string name="group_select_new_group">New group</string>
+    <string name="group_select_multi_hint">Multiple groups can be selected. Leave all unchecked to use the current group.</string>
     <string name="group_edit">Group editing</string>
     <string name="move_to_group">Move to group</string>
     <string name="add_group">Add to Groups</string>
