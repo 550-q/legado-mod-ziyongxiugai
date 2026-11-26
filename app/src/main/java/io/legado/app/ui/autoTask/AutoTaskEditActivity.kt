@@ -318,12 +318,14 @@ class AutoTaskEditActivity : VMBaseActivity<ActivityAutoTaskEditBinding, AutoTas
         }
         val current = buildDraft()
         if (origin != null && current != origin) {
+            // 与其他编辑页一致：是＝继续编辑，否＝放弃修改并退出
             showComposeConfirmDialog(
                 title = getString(R.string.exit),
                 message = getString(R.string.exit_no_save),
                 positiveText = getString(R.string.yes),
                 negativeText = getString(R.string.no),
-                onPositive = { super.finish() }
+                onPositive = {},
+                onNegative = { super.finish() }
             )
         } else {
             super.finish()

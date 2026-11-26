@@ -14,7 +14,9 @@ import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedTextField
+import androidx.compose.material3.OutlinedTextFieldDefaults
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
@@ -23,6 +25,7 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.ComposeView
 import androidx.compose.ui.platform.ViewCompositionStrategy
 import androidx.compose.ui.text.style.TextAlign
@@ -219,7 +222,24 @@ private fun AppearanceKitEditScreen(
                         .fillMaxWidth()
                         .padding(14.dp),
                     label = { Text("名称") },
-                    singleLine = true
+                    singleLine = true,
+                    // 输入框文字跟随主题的标题/界面字体颜色，夜间主题下不再深底深字
+                    textStyle = MaterialTheme.typography.bodyLarge.copy(
+                        color = palette.primaryText,
+                        fontFamily = palette.bodyFontFamily
+                    ),
+                    colors = OutlinedTextFieldDefaults.colors(
+                        focusedTextColor = palette.primaryText,
+                        unfocusedTextColor = palette.primaryText,
+                        disabledTextColor = palette.secondaryText,
+                        cursorColor = palette.accent,
+                        focusedContainerColor = Color.Transparent,
+                        unfocusedContainerColor = Color.Transparent,
+                        focusedBorderColor = palette.accent.copy(alpha = 0.55f),
+                        unfocusedBorderColor = palette.secondaryText.copy(alpha = 0.45f),
+                        focusedLabelColor = palette.accent,
+                        unfocusedLabelColor = palette.secondaryText
+                    )
                 )
                 PresetRow(kit.binding.preset, palette) {
                     onSelectPreset(kit.binding.preset) { preset ->
