@@ -8,6 +8,7 @@ import android.os.Build
 import android.text.TextUtils
 import android.util.AttributeSet
 import android.view.Gravity
+import android.view.MotionEvent
 import android.view.View
 import android.view.ViewGroup
 import android.view.animation.PathInterpolator
@@ -197,9 +198,13 @@ class MainTopBarView @JvmOverloads constructor(
         applyTopBarStyle(force = true)
     }
 
-    fun setPrimaryItems(items: List<RoundedTagBarView.Item>, selectedIndex: Int) {
+    fun setPrimaryItems(
+        items: List<RoundedTagBarView.Item>,
+        selectedIndex: Int,
+        smooth: Boolean = false
+    ) {
         primaryBarRequested = items.isNotEmpty()
-        primaryBar.submitItems(items, selectedIndex)
+        primaryBar.submitItems(items, selectedIndex, smooth)
         updatePrimaryBarVisibility()
     }
 
@@ -727,6 +732,15 @@ class MainTopBarView @JvmOverloads constructor(
             setInterpolator(LayoutTransition.CHANGE_DISAPPEARING, topBarEaseInOut)
             setInterpolator(LayoutTransition.CHANGING, topBarEaseOut)
         }
+    }
+
+    /**
+     * 覆盖式顶栏浮在列表之上（API>=33 的常规样式，列表从屏幕顶部开始、顶栏盖在上面）。
+     * 顶栏内部的空白、间距（比如搜索栏与分组栏之间的 8dp）若没有子 View 消费，
+     * 触摸会穿透到下面的列表，拖动分组栏就变成滚动书架。这里统一吃掉顶栏范围内的触摸。
+     */
+    override fun onTouchEvent(event: MotionEvent): Boolean {
+        return true
     }
 
     private class ContentMeasuredFrameLayout(context: Context) : FrameLayout(context) {

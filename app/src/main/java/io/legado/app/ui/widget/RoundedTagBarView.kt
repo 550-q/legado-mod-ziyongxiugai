@@ -57,6 +57,11 @@ class RoundedTagBarView @JvmOverloads constructor(
     private var selectedBackgroundVisible = true
     private var displayMode = DisplayMode.CHIP
     private var backgroundOverrideColor: Int? = null
+    // 启动时控件还没测量，centering 必须等布局完成；用这两个字段挂起一次居中请求
+    private var pendingCenterIndex = RecyclerView.NO_POSITION
+    private var pendingCenterSmooth = false
+    private var centeredIndex = RecyclerView.NO_POSITION
+    private var lastWidth = 0
 
     init {
         clipToOutline = true
@@ -68,6 +73,18 @@ class RoundedTagBarView @JvmOverloads constructor(
             recyclerView,
             LayoutParams(LayoutParams.MATCH_PARENT, LayoutParams.MATCH_PARENT)
         )
+        // 首次布局 / 宽度变化后把当前选中项重新居中
+        recyclerView.addOnLayoutChangeListener { _, _, _, _, _, _, _, _, _ ->
+            val width = recyclerView.width
+            if (width != lastWidth) {
+                lastWidth = width
+                if (width > 0 && selectedIndex != RecyclerView.NO_POSITION) {
+                    pendingCenterIndex = selectedIndex
+                    pendingCenterSmooth = false
+                }
+            }
+            flushPendingCenter()
+        }
     }
 
     override fun onAttachedToWindow() {
@@ -143,10 +160,14 @@ class RoundedTagBarView @JvmOverloads constructor(
         adapter.notifyDataSetChanged()
     }
 
-    fun submitItems(items: List<Item>, selectedIndex: Int = this.selectedIndex) {
+    fun submitItems(
+        items: List<Item>,
+        selectedIndex: Int = this.selectedIndex,
+        smooth: Boolean = false
+    ) {
         val sameItems = this.items == items
         if (sameItems) {
-            setSelectedIndex(selectedIndex, smooth = false)
+            setSelectedIndex(selectedIndex, smooth)
             return
         }
         this.items = items.toList()
@@ -160,7 +181,7 @@ class RoundedTagBarView @JvmOverloads constructor(
     fun setSelectedIndex(index: Int, smooth: Boolean = true) {
         val newIndex = normalizeIndex(index)
         if (selectedIndex == newIndex) {
-            if (newIndex != RecyclerView.NO_POSITION) {
+            if (newIndex != RecyclerView.NO_POSITION && newIndex != centeredIndex) {
                 scrollToIndex(newIndex, smooth)
             }
             return
@@ -191,35 +212,50 @@ class RoundedTagBarView @JvmOverloads constructor(
     }
 
     private fun scrollToIndex(index: Int, smooth: Boolean) {
-        recyclerView.post {
-            if (index !in items.indices) return@post
-            val child = layoutManager.findViewByPosition(index)
-            if (child == null) {
-                if (smooth) {
-                    recyclerView.smoothScrollToPosition(index)
-                } else {
-                    recyclerView.scrollToPosition(index)
-                }
-                recyclerView.post { centerVisibleChild(index, false) }
-                return@post
-            }
+        if (index !in items.indices) return
+        if (recyclerView.width <= 0) {
+            // 启动时 TopBar 还没测量，先记下来等 layout 回调
+            pendingCenterIndex = index
+            pendingCenterSmooth = smooth
+            return
+        }
+        val child = layoutManager.findViewByPosition(index)
+        if (child != null) {
+            pendingCenterIndex = RecyclerView.NO_POSITION
             centerChild(child.left, child.width, smooth)
+        } else {
+            pendingCenterIndex = index
+            pendingCenterSmooth = smooth
+            if (smooth) {
+                recyclerView.smoothScrollToPosition(index)
+            } else {
+                recyclerView.scrollToPosition(index)
+            }
         }
     }
 
-    private fun centerVisibleChild(index: Int, smooth: Boolean) {
+    private fun flushPendingCenter() {
+        val index = pendingCenterIndex
+        if (index == RecyclerView.NO_POSITION || recyclerView.width <= 0) return
         val child = layoutManager.findViewByPosition(index) ?: return
-        centerChild(child.left, child.width, smooth)
+        pendingCenterIndex = RecyclerView.NO_POSITION
+        centerChild(child.left, child.width, pendingCenterSmooth)
     }
 
     private fun centerChild(childLeft: Int, childWidth: Int, smooth: Boolean) {
-        val dx = childLeft - (recyclerView.width - childWidth) / 2
-        if (dx == 0) return
+        val viewWidth = recyclerView.width
+        if (viewWidth <= 0) return
+        val dx = childLeft - (viewWidth - childWidth) / 2
+        if (dx == 0) {
+            centeredIndex = selectedIndex
+            return
+        }
         if (smooth) {
             recyclerView.smoothScrollBy(dx, 0)
         } else {
             recyclerView.scrollBy(dx, 0)
         }
+        centeredIndex = selectedIndex
     }
 
     private inner class TagAdapter : RecyclerView.Adapter<TagViewHolder>() {

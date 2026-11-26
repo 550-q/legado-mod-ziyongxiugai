@@ -190,6 +190,17 @@ class RssFragment() : VMBaseFragment<RssViewModel>(R.layout.fragment_rss), MainF
             initModernRssView()
             observeRssSources()
         } else {
+            // 从新版订阅切回经典订阅时，清掉新版给列表加的顶部占位，
+            // 否则列表上方会留出一大片空白。
+            binding.recyclerView.setPadding(
+                binding.recyclerView.paddingLeft,
+                0,
+                binding.recyclerView.paddingRight,
+                binding.recyclerView.paddingBottom
+            )
+            binding.recyclerView.clipToPadding = true
+            rssTopOverlaySpace = 0
+            rssTopOverlayEnabled = false
             initClassicRecycler()
             observeClassicRssSources()
         }

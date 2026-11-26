@@ -61,6 +61,7 @@ class BookshelfFragment1() : BaseBookshelfFragment(R.layout.fragment_bookshelf1)
     private var selectedBookTag = ""
     private val groupShelfCache = hashMapOf<Long, List<BookShelfDisplay>>()
     private var currentGroupIndex = 0
+    private var groupSelectionRestored = false
     private var topOverlaySpace = 0
     private var topOverlayEnabled = false
     private var structureVersion = 0
@@ -140,6 +141,8 @@ class BookshelfFragment1() : BaseBookshelfFragment(R.layout.fragment_bookshelf1)
                     val group = bookGroups[position]
                     fragmentMap[group.groupId]?.setBookTagFilter("")
                     renderBookTags(groupShelfCache[group.groupId].orEmpty())
+                    // 左右划动切换分组后也要记住当前位置，不能只在点击标签时保存
+                    persistCurrentGroup(position)
                 }
             }
         )
@@ -158,6 +161,18 @@ class BookshelfFragment1() : BaseBookshelfFragment(R.layout.fragment_bookshelf1)
         binding.root.post {
             updateTopBarOverlay()
         }
+    }
+
+    override fun onPause() {
+        super.onPause()
+        // 关闭/离开书架前再落一次，确保当前显示的分组就是下次启动恢复的分组
+        persistCurrentGroup()
+    }
+
+    private fun persistCurrentGroup(position: Int = binding.viewPagerBookshelf.currentItem) {
+        // 启动恢复完成前不写，避免初始页(0)在恢复前覆盖已保存的分组
+        if (!groupSelectionRestored || position !in bookGroups.indices) return
+        AppConfig.saveTabPosition = position
     }
 
     private fun updateTopBarOverlay() {
@@ -211,16 +226,18 @@ class BookshelfFragment1() : BaseBookshelfFragment(R.layout.fragment_bookshelf1)
         if (data.isEmpty()) {
             appDb.bookGroupDao.enableGroup(BookGroup.IdAll)
         } else if (data != bookGroups) {
+            // 分组列表变化期间先暂停持久化，等恢复到保存的分组后再开放
+            groupSelectionRestored = false
             bookGroups.clear()
             bookGroups.addAll(data)
             adapter.notifyDataSetChanged()
-            renderGroupSelector()
+            renderGroupSelector(smooth = false)
             selectSavedGroup()
         } else {
-            renderGroupSelector()
+            renderGroupSelector(smooth = false)
             renderGroupTags()
         }
-        updateHeaderTitle()
+        updateHeaderTitle(smooth = false)
     }
 
     override fun upSort() {
@@ -232,7 +249,7 @@ class BookshelfFragment1() : BaseBookshelfFragment(R.layout.fragment_bookshelf1)
             if (bookGroups.isEmpty()) {
                 binding.topBar.setPrimaryItems(emptyList(), -1)
                 binding.topBar.tagsBar.submitItems(emptyList(), -1)
-                updateHeaderTitle()
+                updateHeaderTitle(smooth = false)
                 return@post
             }
             val target = AppConfig.saveTabPosition.coerceIn(0, bookGroups.lastIndex)
@@ -248,15 +265,16 @@ class BookshelfFragment1() : BaseBookshelfFragment(R.layout.fragment_bookshelf1)
         renderBookTags(emptyList())
     }
 
-    private fun updateHeaderTitle() {
+    private fun updateHeaderTitle(smooth: Boolean = groupSelectionRestored) {
         binding.topBar.setTitle(selectedGroup?.groupName ?: getString(R.string.bookshelf))
-        renderGroupSelector()
+        renderGroupSelector(smooth)
     }
 
-    private fun renderGroupSelector() {
+    private fun renderGroupSelector(smooth: Boolean = groupSelectionRestored) {
         binding.topBar.setPrimaryItems(
             bookGroups.map { RoundedTagBarView.Item(it.groupName) },
-            currentGroupIndex.coerceIn(-1, bookGroups.lastIndex)
+            currentGroupIndex.coerceIn(-1, bookGroups.lastIndex),
+            smooth
         )
         scheduleTopBarOverlayUpdate()
     }
@@ -324,6 +342,8 @@ class BookshelfFragment1() : BaseBookshelfFragment(R.layout.fragment_bookshelf1)
         fragmentMap[groupId]?.setBookTagFilter("")
         renderBookTags(groupShelfCache[groupId].orEmpty())
         updateHeaderTitle()
+        // 点击/菜单/侧栏/恢复最终都会走到这里，表示当前分组已经确定
+        groupSelectionRestored = true
     }
 
     fun switchToGroupId(groupId: Long) {
@@ -395,6 +415,8 @@ class BookshelfFragment1() : BaseBookshelfFragment(R.layout.fragment_bookshelf1)
         structureVersion++
         fragmentMap.clear()
         selectedBookTag = ""
+        // 重建期间页码可能短暂变化，先停用持久化，等重新定位到目标分组后再开放
+        groupSelectionRestored = false
         binding.viewPagerBookshelf.post {
             if (!isAdded) return@post
             adapter.notifyDataSetChanged()

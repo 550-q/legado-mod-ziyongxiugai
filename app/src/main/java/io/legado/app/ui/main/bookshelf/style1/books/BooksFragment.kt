@@ -24,6 +24,7 @@ import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
+import androidx.compose.runtime.snapshotFlow
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clipToBounds
@@ -51,6 +52,7 @@ import io.legado.app.data.entities.BookGroup
 import io.legado.app.databinding.FragmentBooksBinding
 import io.legado.app.help.book.BookTagHelper
 import io.legado.app.help.config.AppConfig
+import io.legado.app.help.config.FastScrollerConfig
 import io.legado.app.lib.theme.accentColor
 import io.legado.app.lib.theme.primaryColor
 import io.legado.app.ui.book.info.BookInfoNavigator
@@ -79,6 +81,7 @@ import kotlinx.coroutines.Dispatchers.IO
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.catch
+import kotlinx.coroutines.flow.collect
 import kotlinx.coroutines.flow.conflate
 import kotlinx.coroutines.flow.flowOn
 import kotlinx.coroutines.flow.map
@@ -128,6 +131,7 @@ class BooksFragment() : BaseFragment(R.layout.fragment_books) {
     private var composeItems by mutableStateOf<List<BookshelfItemUi>>(emptyList())
     private var shelfDisplays: List<BookShelfDisplay> = emptyList()
     private var composeCanScrollBackward by mutableStateOf(false)
+    private var composeFirstVisibleIndex = 0
     private var composeScrollToTopTick by mutableStateOf(0)
     private var composeImmediateScrollToTopTick by mutableStateOf(0)
     private var composeListItemStyle by mutableIntStateOf(AppConfig.bookshelfListItemStyle)
@@ -313,6 +317,11 @@ class BooksFragment() : BaseFragment(R.layout.fragment_books) {
         LaunchedEffect(canScrollBackward) {
             composeCanScrollBackward = canScrollBackward
         }
+        LaunchedEffect(gridState) {
+            snapshotFlow { gridState.firstVisibleItemIndex }.collect {
+                composeFirstVisibleIndex = it
+            }
+        }
         LaunchedEffect(composeImmediateScrollToTopTick) {
             if (composeImmediateScrollToTopTick > 0) {
                 gridState.scrollToItem(0)
@@ -356,8 +365,10 @@ class BooksFragment() : BaseFragment(R.layout.fragment_books) {
             }
             ComposeLazyGridFastScroller(
                 state = gridState,
-                enabled = AppConfig.showBookshelfFastScroller,
-                modifier = Modifier.align(Alignment.CenterEnd)
+                enabled = FastScrollerConfig.bookshelfScrollerEnabled,
+                modifier = Modifier.align(Alignment.CenterEnd),
+                topInset = topExtraDp,
+                bottomInset = bottomBarPadding
             )
         }
     }
@@ -399,6 +410,11 @@ class BooksFragment() : BaseFragment(R.layout.fragment_books) {
         val renderConfig = rememberBookshelfListRenderConfig()
         LaunchedEffect(canScrollBackward) {
             composeCanScrollBackward = canScrollBackward
+        }
+        LaunchedEffect(listState) {
+            snapshotFlow { listState.firstVisibleItemIndex }.collect {
+                composeFirstVisibleIndex = it
+            }
         }
         LaunchedEffect(composeImmediateScrollToTopTick) {
             if (composeImmediateScrollToTopTick > 0) {
@@ -446,8 +462,10 @@ class BooksFragment() : BaseFragment(R.layout.fragment_books) {
             }
             ComposeLazyListFastScroller(
                 state = listState,
-                enabled = AppConfig.showBookshelfFastScroller,
-                modifier = Modifier.align(Alignment.CenterEnd)
+                enabled = FastScrollerConfig.bookshelfScrollerEnabled,
+                modifier = Modifier.align(Alignment.CenterEnd),
+                topInset = topExtraDp,
+                bottomInset = bottomBarPadding
             )
         }
     }
@@ -510,7 +528,7 @@ class BooksFragment() : BaseFragment(R.layout.fragment_books) {
             binding.rvBookshelf.setFastScrollEnabled(false)
             return
         }
-        val showBookshelfFastScroller = AppConfig.showBookshelfFastScroller
+        val showBookshelfFastScroller = FastScrollerConfig.bookshelfScrollerEnabled
         binding.rvBookshelf.setFastScrollEnabled(showBookshelfFastScroller)
         if (showBookshelfFastScroller) {
             binding.rvBookshelf.scrollBarSize = 0
@@ -572,7 +590,7 @@ class BooksFragment() : BaseFragment(R.layout.fragment_books) {
                     Lifecycle.State.RESUMED,
                     AppDatabase.BOOK_TABLE_NAME
                 ).catch {
-                    AppLog.put("涔︽灦鏇存柊鍑洪敊", it)
+                    AppLog.put("书架更新出错", it)
                 }.conflate().flowOn(Dispatchers.Default).collect { (allBooks, list, items) ->
                     shelfDisplays = list
                     (parentFragment as? io.legado.app.ui.main.bookshelf.style1.BookshelfFragment1)
@@ -584,7 +602,14 @@ class BooksFragment() : BaseFragment(R.layout.fragment_books) {
                     }
                     binding.tvEmptyMsg.isGone = itemCount > 0
                     binding.refreshLayout.isEnabled = enableRefresh && itemCount > 0
+                    // 添加新书后新书会插到列表顶部。LazyColumn 会按 key 锚定原来
+                    // 第一本书的显示位置，导致新书被挤到屏幕上边看不见，需要滑回去。
+                    val revealNewTopItem = composeFirstVisibleIndex == 0 &&
+                            hasNewTopItem(composeItems, items)
                     composeItems = items
+                    if (revealNewTopItem) {
+                        composeImmediateScrollToTopTick++
+                    }
                     saveComposeSnapshot(snapshotKey, items)
                     delay(100)
                 }
@@ -689,6 +714,21 @@ class BooksFragment() : BaseFragment(R.layout.fragment_books) {
 
     fun getBooksCount(): Int {
         return composeItems.size
+    }
+
+    /**
+     * 判断是否有新条目被插到列表最前面（原第一条被挤到后面）。
+     */
+    private fun hasNewTopItem(
+        oldItems: List<BookshelfItemUi>,
+        newItems: List<BookshelfItemUi>
+    ): Boolean {
+        if (oldItems.isEmpty() || newItems.size <= oldItems.size) return false
+        val oldTopKey = oldItems.first().key
+        val newTopKey = newItems.first().key
+        if (newTopKey == oldTopKey) return false
+        if (oldItems.any { it.key == newTopKey }) return false
+        return newItems.indexOfFirst { it.key == oldTopKey } > 0
     }
 
     override fun onDestroyView() {
