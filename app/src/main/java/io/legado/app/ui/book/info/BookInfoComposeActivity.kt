@@ -47,6 +47,7 @@ import io.legado.app.help.config.AppConfig
 import io.legado.app.help.config.LocalConfig
 import io.legado.app.lib.dialogs.alert
 import io.legado.app.lib.dialogs.selector
+import io.legado.app.model.ReadBook
 import io.legado.app.model.SourceCallBack
 import io.legado.app.model.remote.RemoteBookWebDav
 import io.legado.app.ui.book.audio.AudioPlayActivity
@@ -135,6 +136,8 @@ class BookInfoComposeActivity :
     private val tocActivityResult = registerForActivityResult(TocActivityResult()) {
         it?.let { result ->
             viewModel.getBook(false)?.let { book ->
+                // 详情页目录跳转前记录当前阅读位置
+                rememberReadPositionBeforeChapterJump(book)
                 lifecycleScope.launch {
                     withContext(IO) {
                         book.durChapterIndex = result[0] as Int
@@ -744,10 +747,22 @@ class BookInfoComposeActivity :
 
     private fun openChapterDirect(chapter: BookChapter) {
         viewModel.getBook()?.let { book ->
+            // 详情页目录跳转前记录当前阅读位置
+            rememberReadPositionBeforeChapterJump(book)
             chapterChanged = true
             viewModel.saveBookAtChapter(book, chapter) { targetBook ->
                 startReadActivity(targetBook)
             }
+        }
+    }
+
+    /**
+     * 从目录跳转前记录跳转前的阅读位置。
+     * 阅读界面还在时直接取当前页；不在时用书籍保存的进度生成记录，等阅读界面启动后接收。
+     */
+    private fun rememberReadPositionBeforeChapterJump(book: Book) {
+        if (!ReadBook.saveCurrentBookProgress(book.bookUrl)) {
+            ReadBook.stageJumpFromStoredProgress(book)
         }
     }
 

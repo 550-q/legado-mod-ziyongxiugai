@@ -123,12 +123,14 @@ class ReadView(context: Context, attrs: AttributeSet) :
         if (!isTextSelected || selectionHandle == null) return
         updateSelectionAt(x, y)
         selectionAutoPager.update(x, y, curPage.selectionTop, curPage.selectionBottom)
+        showSelectionMagnifierAt(x, y)
     }
 
     fun endSelectionHandleDrag() {
         selectionAutoPager.cancel()
         selectionHandle = null
         curPage.resetReverseCursor()
+        dismissSelectionMagnifier()
         if (isTextSelected) curPage.refreshSelectionHandles()
     }
 
@@ -535,7 +537,26 @@ class ReadView(context: Context, attrs: AttributeSet) :
         if (Build.VERSION.SDK_INT < Build.VERSION_CODES.P || !isAttachedToWindow) return
         val safeX = x.coerceIn(0f, width.toFloat())
         val safeY = y.coerceIn(0f, height.toFloat())
-        (selectionMagnifier ?: Magnifier(this).also { selectionMagnifier = it }).show(safeX, safeY)
+        val magnifier = selectionMagnifier ?: createSelectionMagnifier().also { selectionMagnifier = it }
+        magnifier.show(safeX, safeY)
+    }
+
+    /**
+     * 拖动选区左右手柄时也显示放大镜（长按选字和拖选文字本来就会显示）。
+     */
+    fun showSelectionMagnifierAt(x: Float, y: Float) {
+        if (!isTextSelected || curPage.hasNativeSelection()) return
+        showSelectionMagnifier(x, y)
+    }
+
+    private fun createSelectionMagnifier(): Magnifier {
+        val density = resources.displayMetrics.density
+        return Magnifier.Builder(this).apply {
+            setSize((168 * density).toInt(), (64 * density).toInt())
+            setCornerRadius(20 * density)
+            setElevation(8 * density)
+            setInitialZoom(1.6f)
+        }.build()
     }
 
     private fun dismissSelectionMagnifier() {

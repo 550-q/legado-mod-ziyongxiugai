@@ -45,8 +45,10 @@ import io.legado.app.utils.mapParallelSafe
 import io.legado.app.utils.postEvent
 import io.legado.app.utils.toStringArray
 import io.legado.app.utils.toastOnUi
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.currentCoroutineContext
 import kotlinx.coroutines.ensureActive
+import kotlinx.coroutines.withContext
 import kotlinx.coroutines.flow.catch
 import kotlinx.coroutines.flow.collect
 import kotlinx.coroutines.flow.flow
@@ -114,6 +116,8 @@ class ReadBookViewModel(application: Application) : BaseViewModel(application) {
                 book != null -> {
                     ReadBook.markRecentRead(book)
                     initBook(book)
+                    // 接收书籍详情页目录跳转时暂存的“跳转前位置”
+                    ReadBook.adoptPendingJumpRecords(book.bookUrl)
                 }
                 else -> {
                     ReadBook.upMsg(context.getString(R.string.no_book))
@@ -123,7 +127,9 @@ class ReadBookViewModel(application: Application) : BaseViewModel(application) {
             val index = intent.getIntExtra("index", -1)
             val chapterPos = intent.getIntExtra("chapterPos", -1)
             if (index >= 0 && chapterPos >= 0) { //从书签打开的正文，有进度传递
-                ReadBook.saveCurrentBookProgress() //启用恢复进度提示
+                withContext(Dispatchers.Main) {
+                    ReadBook.saveCurrentBookProgress()
+                }
                 openChapter(index, chapterPos)
             }
         }.onSuccess {

@@ -32,6 +32,7 @@ import android.widget.ScrollView
 import android.widget.TextView
 import android.text.StaticLayout
 import android.text.TextPaint
+import android.text.TextUtils
 import androidx.activity.addCallback
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.appcompat.app.AlertDialog
@@ -123,6 +124,9 @@ import io.legado.app.lib.theme.themeCardColorOrDefault
 import io.legado.app.lib.theme.uiTypeface
 import io.legado.app.model.ReadAloud
 import io.legado.app.model.ReadBook
+import io.legado.app.model.ReadJumpRecord
+import io.legado.app.model.ReadPageSnapshot
+import io.legado.app.model.firstSentenceOfPageText
 import io.legado.app.model.inheritNotShelfStateFrom
 import io.legado.app.model.resolveStoredBookshelfState
 import io.legado.app.model.ImageProvider
@@ -277,7 +281,9 @@ import com.script.rhino.runScriptWithContext
 import io.legado.app.model.analyzeRule.AnalyzeUrl.Companion.paramPattern
 import io.legado.app.ui.login.SourceLoginJsExtensions
 import java.text.DateFormat
+import java.text.SimpleDateFormat
 import java.util.Date
+import java.util.Locale
 import java.io.File
 import java.util.regex.Matcher
 
@@ -315,6 +321,8 @@ class ReadBookActivity : BaseReadBookActivity(),
                         binding.readAloudPlayerPanel.isExpanded()
                 val chapterIndex = it[0] as Int
                 val chapterPos = it[1] as Int
+                // 目录跳转前记录当前页，返回时可选择恢复
+                ReadBook.saveCurrentBookProgress()
                 if (isEpubCoreMode()) {
                     if (ReadBook.book?.isEpub == true) {
                         val chapterUrl = (it.getOrNull(5) as? String).orEmpty()
@@ -325,7 +333,6 @@ class ReadBookActivity : BaseReadBookActivity(),
                         )
                         openEpubTocChapter(selection.chapterIndex, selection.fragmentId)
                     } else {
-                        ReadBook.saveCurrentBookProgress()
                         openDirectTextChapter(chapterIndex, chapterPos)
                     }
                 } else {
@@ -439,8 +446,8 @@ class ReadBookActivity : BaseReadBookActivity(),
         }
     }
 
-    //恢复跳转前进度对话框的交互结果
-    private var confirmRestoreProcess: Boolean? = null
+    // 跳转历史选择框（恢复跳转前阅读位置）
+    private var jumpHistoryDialog: AlertDialog? = null
     private val networkChangedListener by lazy {
         NetworkChangedListener(this)
     }
@@ -790,12 +797,14 @@ class ReadBookActivity : BaseReadBookActivity(),
         }
         if (isShowingSearchResult) {
             exitSearchMenu()
-            restoreLastBookProcess()
-            return
+            if (ReadBook.hasJumpHistory()) {
+                showJumpHistoryDialog()
+                return
+            }
         }
-        //拦截返回供恢复阅读进度
-        if (ReadBook.lastBookProgress != null && confirmRestoreProcess != false) {
-            restoreLastBookProcess()
+        // 有跳转记录时，系统返回只负责弹出/关闭选择框，只有“退出”才返回书架
+        if (ReadBook.hasJumpHistory()) {
+            showJumpHistoryDialog()
             return
         }
         if (isAutoPage) {
@@ -1413,6 +1422,11 @@ class ReadBookActivity : BaseReadBookActivity(),
                 selectionPointerOffsetY = selectionScreenLocation[1] - event.rawY - 1f
                 textActionMenu.dismiss()
                 readView.beginSelectionHandleDrag(v.id == R.id.cursor_left)
+                readView.getLocationOnScreen(selectionScreenLocation)
+                readView.showSelectionMagnifierAt(
+                    event.rawX + selectionPointerOffsetX - selectionScreenLocation[0],
+                    event.rawY + selectionPointerOffsetY - selectionScreenLocation[1]
+                )
             }
             MotionEvent.ACTION_MOVE -> {
                 if (activeSelectionCursor !== v) return@run true
@@ -1586,6 +1600,8 @@ class ReadBookActivity : BaseReadBookActivity(),
         } else {
             binding.readView.getSelectText()
         }
+
+    override fun supportsContentSearch(): Boolean = !isEpubCoreMode()
 
     /**
      * 文本选择菜单操作
@@ -4124,6 +4140,11 @@ class ReadBookActivity : BaseReadBookActivity(),
     }
 
     override fun returnToBookshelf() {
+        // 正文左上角“返回书架”：有跳转记录时先弹出选择框
+        if (ReadBook.hasJumpHistory()) {
+            showJumpHistoryDialog()
+            return
+        }
         finish()
     }
 
@@ -4573,6 +4594,7 @@ class ReadBookActivity : BaseReadBookActivity(),
                 if (isEpubCoreMode()) {
                     skipToChapter(chapter.index)
                 } else {
+                    ReadBook.saveCurrentBookProgress()
                     viewModel.openChapter(chapter.index)
                 }
             }.onFailure {
@@ -4899,32 +4921,208 @@ class ReadBookActivity : BaseReadBookActivity(),
         }
     }
 
-    /* 恢复到 全文搜索/进度条跳转前的位置 */
-    private fun restoreLastBookProcess() {
-        if (confirmRestoreProcess == true) {
-            ReadBook.restoreLastBookProgress()
-        } else if (confirmRestoreProcess == null) {
-            alert(R.string.draw) {
-                setMessage(R.string.restore_last_book_process)
-                yesButton {
-                    confirmRestoreProcess = true
-                    ReadBook.restoreLastBookProgress() //恢复启动全文搜索前的进度
-                }
-                noButton {
-                    ReadBook.clearLastBookProgress()
-                    confirmRestoreProcess = false
-                }
-                onCancelled {
-                    ReadBook.clearLastBookProgress()
-                    confirmRestoreProcess = false
-                }
+    /* 选择要恢复的跳转前阅读位置 */
+    private fun showJumpHistoryDialog() {
+        if (isFinishing || isDestroyed) return
+        if (jumpHistoryDialog?.isShowing == true) return
+        val records = ReadBook.currentJumpHistory()
+        if (records.isEmpty()) {
+            finish()
+            return
+        }
+        autoPageStop()
+        val dividerColor = (secondaryTextColor and 0x00FFFFFF) or 0x1F000000
+        val content = LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL
+            setPadding(18.dpToPx(), 8.dpToPx(), 18.dpToPx(), 0)
+        }
+        content.addView(TextView(this).apply {
+            text = getString(R.string.read_jump_history_hint)
+            textSize = 12.5f
+            setTextColor(secondaryTextColor)
+            setPadding(0, 0, 0, 6.dpToPx())
+            applyUiBodyTypefaceDeep(this@ReadBookActivity.uiTypeface())
+        })
+        val listLayout = LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL
+        }
+        lateinit var dialog: AlertDialog
+        records.forEachIndexed { index, record ->
+            if (index > 0) {
+                listLayout.addView(View(this).apply {
+                    setBackgroundColor(dividerColor)
+                    layoutParams = LinearLayout.LayoutParams(
+                        ViewGroup.LayoutParams.MATCH_PARENT,
+                        1
+                    )
+                })
             }
+            listLayout.addView(createJumpHistoryRow(record) {
+                dialog.dismiss()
+                jumpToJumpRecord(record)
+            })
+        }
+        val rowHeight = 64.dpToPx()
+        val maxListHeight = (resources.displayMetrics.heightPixels * 0.46f).toInt()
+        val scrollView = NestedScrollView(this).apply {
+            overScrollMode = View.OVER_SCROLL_IF_CONTENT_SCROLLS
+            addView(
+                listLayout,
+                ViewGroup.LayoutParams(
+                    ViewGroup.LayoutParams.MATCH_PARENT,
+                    ViewGroup.LayoutParams.WRAP_CONTENT
+                )
+            )
+            layoutParams = LinearLayout.LayoutParams(
+                ViewGroup.LayoutParams.MATCH_PARENT,
+                minOf(records.size * rowHeight, maxListHeight).coerceAtLeast(rowHeight)
+            )
+        }
+        content.addView(scrollView)
+        content.addView(View(this).apply {
+            setBackgroundColor(dividerColor)
+            layoutParams = LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, 1)
+        })
+        content.addView(TextView(this).apply {
+            text = getString(R.string.exit)
+            textSize = 16f
+            gravity = Gravity.CENTER
+            setTextColor(accentColor)
+            setPadding(0, 13.dpToPx(), 0, 13.dpToPx())
+            isClickable = true
+            isFocusable = true
+            applyUiTitleTypeface(this@ReadBookActivity)
+            applySelectableBackground(this)
+            setOnClickListener {
+                dialog.dismiss()
+                ReadBook.clearJumpHistory()
+                finish()
+            }
+        })
+        dialog = AndroidAlertBuilder(this).apply {
+            setCustomView(content)
+            onDismiss { jumpHistoryDialog = null }
+        }.show()
+        dialog.setCanceledOnTouchOutside(true)
+        jumpHistoryDialog = dialog
+    }
+
+    private fun applySelectableBackground(view: View) {
+        val outValue = android.util.TypedValue()
+        if (theme.resolveAttribute(android.R.attr.selectableItemBackground, outValue, true)) {
+            view.setBackgroundResource(outValue.resourceId)
         }
     }
 
-    private fun clearRestoreProcessState() {
-        confirmRestoreProcess = null
-        ReadBook.clearLastBookProgress()
+    private fun createJumpHistoryRow(record: ReadJumpRecord, onClick: () -> Unit): View {
+        val row = LinearLayout(this).apply {
+            orientation = LinearLayout.HORIZONTAL
+            gravity = Gravity.CENTER_VERTICAL
+            setPadding(0, 9.dpToPx(), 0, 9.dpToPx())
+            minimumHeight = 60.dpToPx()
+            isClickable = true
+            isFocusable = true
+            applySelectableBackground(this)
+            setOnClickListener { onClick() }
+        }
+        val timeText = SimpleDateFormat("HH:mm:ss", Locale.getDefault())
+            .format(Date(record.recordTime))
+        row.addView(TextView(this).apply {
+            text = timeText
+            textSize = 12f
+            setTextColor(secondaryTextColor)
+            applyUiBodyTypefaceDeep(this@ReadBookActivity.uiTypeface())
+        })
+        // 与顶部“进度 xx/yyy”一致，显示整本书的章节进度，而不是本章第几页
+        val pageText = if (record.chapterCount > 0) {
+            "${record.chapterIndex + 1}/${record.chapterCount}"
+        } else if (record.pageIndex >= 0 && record.pageCount > 0) {
+            "${record.pageIndex + 1}/${record.pageCount}"
+        } else {
+            "--/--"
+        }
+        row.addView(TextView(this).apply {
+            text = pageText
+            textSize = 12f
+            setTextColor(accentColor)
+            setPadding(10.dpToPx(), 0, 10.dpToPx(), 0)
+            applyUiBodyTypefaceDeep(this@ReadBookActivity.uiTypeface())
+        })
+        val infoLayout = LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL
+        }
+        infoLayout.addView(TextView(this).apply {
+            text = record.snippet.ifBlank { record.chapterTitle }
+            textSize = 14f
+            maxLines = 1
+            ellipsize = TextUtils.TruncateAt.END
+            setTextColor(primaryTextColor)
+            applyUiBodyTypefaceDeep(this@ReadBookActivity.uiTypeface())
+        })
+        if (record.chapterTitle.isNotBlank() && record.snippet.isNotBlank()) {
+            infoLayout.addView(TextView(this).apply {
+                text = record.chapterTitle
+                textSize = 11f
+                maxLines = 1
+                ellipsize = TextUtils.TruncateAt.END
+                setTextColor(secondaryTextColor)
+                setPadding(0, 2.dpToPx(), 0, 0)
+                applyUiBodyTypefaceDeep(this@ReadBookActivity.uiTypeface())
+            })
+        }
+        row.addView(
+            infoLayout,
+            LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f)
+        )
+        return row
+    }
+
+    private fun jumpToJumpRecord(record: ReadJumpRecord) {
+        // 从选择框点记录跳转，也要先记录当前页
+        ReadBook.saveCurrentBookProgress()
+        if (isShowingSearchResult) {
+            exitSearchMenu()
+        }
+        binding.readView.cancelSelect(true)
+        binding.epubReadView.clearSelection()
+        ReadBook.restoreJumpRecord(record)
+    }
+
+    override fun currentReadPageSnapshot(): ReadPageSnapshot? {
+        val currentBook = ReadBook.book ?: return null
+        if (epubCoreActive) {
+            val page = binding.epubReadView.currentPage()
+            // 章节切换过渡期间 currentPage 可能还是上一章，避免把旧页码记到新章节
+            val matchedPage = page?.takeIf { it.chapterIndex == ReadBook.durChapterIndex }
+            val chapterPos = when {
+                matchedPage == null -> ReadBook.durChapterPos
+                currentBook.isEpub -> matchedPage.pageIndex
+                else -> binding.epubReadView.currentDirectTextPosition() ?: ReadBook.durChapterPos
+            }
+            return ReadPageSnapshot(
+                chapterIndex = matchedPage?.chapterIndex ?: ReadBook.durChapterIndex,
+                chapterPos = chapterPos,
+                chapterTitle = ReadBook.curTextChapter?.title
+                    ?: currentBook.durChapterTitle.orEmpty(),
+                chapterCount = ReadBook.chapterSize,
+                pageIndex = matchedPage?.pageIndex ?: -1,
+                pageCount = matchedPage?.totalPagesInChapter ?: -1,
+                snippet = firstSentenceOfPageText(matchedPage?.text)
+            )
+        }
+        val textChapter = ReadBook.curTextChapter ?: return null
+        if (textChapter.chapter.bookUrl != currentBook.bookUrl) return null
+        val pageIndex = ReadBook.durPageIndex
+        val page = textChapter.getPage(pageIndex)
+        return ReadPageSnapshot(
+            chapterIndex = ReadBook.durChapterIndex,
+            chapterPos = ReadBook.durChapterPos,
+            chapterTitle = textChapter.title,
+            chapterCount = ReadBook.chapterSize,
+            pageIndex = pageIndex,
+            pageCount = textChapter.pageSize,
+            snippet = firstSentenceOfPageText(page?.text)
+        )
     }
 
     override fun showLogin() {
@@ -5544,7 +5742,6 @@ class ReadBookActivity : BaseReadBookActivity(),
         index: Int,
         targetFragmentId: String?
     ) {
-        ReadBook.saveCurrentBookProgress()
         // The selected index belongs to the persisted chapter list. The Direct
         // provider resolves that complete BookChapter against the current EPUB facade.
         epubDirectLinkRequestSeq++
@@ -5571,6 +5768,8 @@ class ReadBookActivity : BaseReadBookActivity(),
 
     /* 全文搜索跳转 */
     override fun navigateToSearch(searchResult: SearchResult, index: Int) {
+        // 切换搜索结果也是一次跳转，先记住当前页
+        ReadBook.saveCurrentBookProgress()
         if (isEpubCoreMode()) {
             skipToChapter(searchResult.chapterIndex)
             return
@@ -5692,6 +5891,10 @@ class ReadBookActivity : BaseReadBookActivity(),
         ReadBook.markReadAloudUserNavigation()
         val pageCount = binding.epubReadView.currentChapterPageCount().coerceAtLeast(1)
         val pageIndex = index.coerceIn(0, pageCount - 1)
+        // 进度条跳页前记录当前页
+        if (pageIndex != binding.epubReadView.currentChapterPageIndex()) {
+            ReadBook.saveCurrentBookProgress()
+        }
         val displayedChapterIndex = binding.epubReadView.currentPage()?.chapterIndex
             ?: ReadBook.durChapterIndex
         val changed = binding.epubReadView.setChapterPageIndex(displayedChapterIndex, pageIndex)
@@ -5729,7 +5932,7 @@ class ReadBookActivity : BaseReadBookActivity(),
         val searchResultPositions =
             viewModel.searchResultPositions(curTextChapter, searchResult)
         val (pageIndex, lineIndex, charIndex, addLine, charIndex2) = searchResultPositions
-        ReadBook.skipToPage(pageIndex) {
+        ReadBook.skipToPage(pageIndex, recordOrigin = false) {
             isSelectingSearchResult = true
             binding.readView.curPage.selectStartMoveIndex(0, lineIndex, charIndex)
             when (addLine) {
@@ -6047,7 +6250,13 @@ class ReadBookActivity : BaseReadBookActivity(),
         if (!isChangingConfigurations) {
             ReadAloudAppCapsuleHost.updateReadBookPanelActive(false)
         }
-        clearRestoreProcessState()
+        if (!isChangingConfigurations) {
+            // 阅读界面销毁（退出/被系统回收）即销毁跳转记录
+            jumpHistoryDialog?.dismiss()
+            jumpHistoryDialog = null
+            ReadBook.clearJumpHistory()
+            ReadBook.clearPendingJumpRecords()
+        }
         super.onDestroy()
         epubCoreRequestSeq++
         epubCoreLayoutReadyActionGate.cancel()
