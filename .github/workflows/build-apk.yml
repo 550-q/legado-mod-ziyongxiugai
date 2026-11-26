@@ -1,8 +1,9 @@
 name: Build APK
 
 # 手动触发：Actions -> Build APK -> Run workflow
-# 选分支（mod/archive / main），填 versionCode，跑完在该次 run 页面底部 Artifacts 下载 APK。
-# 不建 tag、不发 Release、不向上游提 PR。
+# 选分支（mod/archive / main），版本号留空自动生成。
+# 产物：每次 run 的 Artifacts + 自动发布到 Releases（可在 create_release 关掉）。
+# 不向上游 rimvoid/legado 提 PR，只在本仓库发 Release。
 
 on:
   workflow_dispatch:
@@ -22,9 +23,14 @@ on:
         options:
           - arm64-v8a
           - armeabi-v7a
+      create_release:
+        description: "构建完成后自动发布到 Releases"
+        required: false
+        type: boolean
+        default: true
 
 permissions:
-  contents: read
+  contents: write
 
 concurrency:
   group: build-apk-${{ github.ref }}
@@ -98,3 +104,24 @@ jobs:
           name: legado-${{ steps.ver.outputs.abi }}-${{ steps.ver.outputs.code }}
           path: out/*.apk
           if-no-files-found: error
+
+      - name: Publish Release
+        if: ${{ inputs.create_release }}
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          TAG="apk-${{ steps.ver.outputs.code }}"
+          TITLE="阅读 Archive ${{ steps.ver.outputs.name }} (${{ steps.ver.outputs.code }})"
+          cat > release-notes.md <<EOF
+          versionName: ${{ steps.ver.outputs.name }}
+          versionCode: ${{ steps.ver.outputs.code }}
+          ABI: ${{ steps.ver.outputs.abi }}
+          Commit: ${{ github.sha }}
+          Build: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+          EOF
+          if gh release view "$TAG" -R "${{ github.repository }}" >/dev/null 2>&1; then
+            gh release upload "$TAG" out/*.apk --clobber -R "${{ github.repository }}"
+            gh release edit "$TAG" --notes-file release-notes.md -R "${{ github.repository }}"
+          else
+            gh release create "$TAG" out/*.apk --title "$TITLE" --notes-file release-notes.md -R "${{ github.repository }}"
+          fi
