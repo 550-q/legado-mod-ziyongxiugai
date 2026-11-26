@@ -12,9 +12,9 @@ on:
         required: false
         default: ""
       version_code:
-        description: "versionCode（必须 >= 已装版本，当前 35500036，且不超过 9 位）"
-        required: true
-        default: "35500038"
+        description: "versionCode；留空则由构建时间自动生成（Unix 分钟数，永远递增、无需手动维护）"
+        required: false
+        default: ""
       abi:
         description: "ABI（只出 arm64-v8a 就够）"
         required: true
@@ -57,8 +57,14 @@ jobs:
           if [ -z "$NAME" ]; then
             NAME="3.26.$(TZ=Asia/Shanghai date +%m%d%H%M)"
           fi
+          CODE="${{ inputs.version_code }}"
+          if [ -z "$CODE" ]; then
+            # 自动版本号：Unix 时间戳的分钟数，单调递增，8 位，不会和已装版本冲突
+            CODE=$(( $(date -u +%s) / 60 ))
+          fi
           echo "name=$NAME" >> "$GITHUB_OUTPUT"
-          echo "code=${{ inputs.version_code }}" >> "$GITHUB_OUTPUT"
+          echo "code=$CODE" >> "$GITHUB_OUTPUT"
+          echo "本次 versionName=$NAME versionCode=$CODE" >> "$GITHUB_STEP_SUMMARY"
           echo "abi=${{ inputs.abi }}" >> "$GITHUB_OUTPUT"
 
       - name: Sanitize Gradle AAPT2 caches
