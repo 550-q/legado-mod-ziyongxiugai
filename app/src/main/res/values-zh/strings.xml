@@ -1245,4 +1245,10 @@
     <string name="timer_custom_invalid">请输入 1~9999 之间的数字</string>
     <string name="pause_read_aloud_after_timer_title">定时结束后暂停朗读</string>
     <string name="pause_read_aloud_after_timer_summary">定时到点后暂停朗读，关闭则停止朗读</string>
+    <string name="content_select_menu_config">正文长按条编辑</string>
+    <string name="content_select_menu_config_summary">调整长按动作顺序，勾选系统文字处理动作</string>
+    <string name="content_select_order_title">动作顺序（长按拖动）</string>
+    <string name="content_select_process_text_title">系统文字处理动作（其他应用）</string>
+    <string name="read_aloud_from_here">从此朗读</string>
+    <string name="read_aloud_selected">朗读选中</string>
 </resources>

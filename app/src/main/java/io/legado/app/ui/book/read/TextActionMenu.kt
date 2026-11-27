@@ -26,6 +26,8 @@ import io.legado.app.constant.PreferKey
 import io.legado.app.databinding.ItemTextBinding
 import io.legado.app.databinding.PopupActionMenuBinding
 import io.legado.app.help.config.AppConfig
+import io.legado.app.help.config.ContentSelectMenuConfig
+import io.legado.app.service.BaseReadAloudService
 import io.legado.app.utils.getPrefBoolean
 import io.legado.app.utils.gone
 import io.legado.app.utils.isAbsUrl
@@ -43,7 +45,8 @@ class TextActionMenu(private val context: Context, private val callBack: CallBac
     private val adapter = Adapter(context).apply {
         setHasStableIds(true)
     }
-    private val menuItems: List<MenuItemImpl>
+    private var menuItems: List<MenuItemImpl> = emptyList()
+    private val builtInItems = arrayListOf<MenuItemImpl>()
     private val visibleMenuItems = arrayListOf<MenuItemImpl>()
     private val moreMenuItems = arrayListOf<MenuItemImpl>()
     private val expandTextMenu get() = context.getPrefBoolean(PreferKey.expandTextMenu)
@@ -57,14 +60,8 @@ class TextActionMenu(private val context: Context, private val callBack: CallBac
         isFocusable = false
 
         val myMenu = MenuBuilder(context)
-        val otherMenu = MenuBuilder(context)
         SupportMenuInflater(context).inflate(R.menu.content_select_action, myMenu)
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
-            onInitializeMenu(otherMenu)
-        }
-        menuItems = myMenu.visibleItems + otherMenu.visibleItems
-        visibleMenuItems.addAll(menuItems.subList(0, 5))
-        moreMenuItems.addAll(menuItems.subList(5, menuItems.size))
+        builtInItems.addAll(myMenu.visibleItems)
         binding.recyclerView.adapter = adapter
         binding.recyclerViewMore.adapter = adapter
         setOnDismissListener {
@@ -92,12 +89,46 @@ class TextActionMenu(private val context: Context, private val callBack: CallBac
     }
 
     fun upMenu() {
+        menuItems = orderedBuiltInItems() + buildProcessTextItems()
+        visibleMenuItems.clear()
+        visibleMenuItems.addAll(menuItems.take(5))
+        moreMenuItems.clear()
+        moreMenuItems.addAll(menuItems.drop(5))
+        binding.ivMenuMore.setImageResource(R.drawable.ic_more_vert)
+        binding.recyclerViewMore.gone()
+        binding.recyclerView.visible()
         if (expandTextMenu) {
             adapter.setItems(menuItems)
             binding.ivMenuMore.gone()
         } else {
             adapter.setItems(visibleMenuItems)
             binding.ivMenuMore.visible()
+        }
+    }
+
+    /**
+     * 按用户保存的顺序排列内置动作；没有保存过就用菜单默认顺序。
+     */
+    private fun orderedBuiltInItems(): List<MenuItemImpl> {
+        val order = ContentSelectMenuConfig.savedOrder(context)
+        if (order.isEmpty()) return builtInItems
+        val index = order.withIndex().associate { it.value to it.index }
+        return builtInItems.sortedBy {
+            index[context.resources.getResourceEntryName(it.itemId)] ?: Int.MAX_VALUE
+        }
+    }
+
+    /**
+     * 系统「文字处理」动作，可在配置里逐个关掉；每次读配置，新装应用不用重启。
+     */
+    private fun buildProcessTextItems(): List<MenuItemImpl> {
+        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.M) return emptyList()
+        val menu = MenuBuilder(context)
+        onInitializeMenu(menu)
+        val disabled = ContentSelectMenuConfig.disabledProcessText(context)
+        return menu.visibleItems.filter { item ->
+            val component = item.intent?.component
+            component == null || "${component.packageName}/${component.className}" !in disabled
         }
     }
 
@@ -184,7 +215,15 @@ class TextActionMenu(private val context: Context, private val callBack: CallBac
             payloads: MutableList<Any>
         ) {
             with(binding) {
-                textView.text = item.title
+                textView.text = if (item.itemId == R.id.menu_aloud) {
+                    if (BaseReadAloudService.isRun || AppConfig.contentSelectSpeakMod == 1) {
+                        context.getString(R.string.read_aloud_from_here)
+                    } else {
+                        context.getString(R.string.read_aloud_selected)
+                    }
+                } else {
+                    item.title
+                }
             }
         }
 

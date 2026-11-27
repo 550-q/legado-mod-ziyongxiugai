@@ -1352,4 +1352,10 @@
     <string name="timer_custom_invalid">Enter a number between 1 and 9999</string>
     <string name="pause_read_aloud_after_timer_title">Pause when timer ends</string>
     <string name="pause_read_aloud_after_timer_summary">Pause read-aloud instead of stopping when the timer runs out</string>
+    <string name="content_select_menu_config">Edit text selection menu</string>
+    <string name="content_select_menu_config_summary">Reorder actions and choose system text actions</string>
+    <string name="content_select_order_title">Action order (long press to drag)</string>
+    <string name="content_select_process_text_title">System text actions (other apps)</string>
+    <string name="read_aloud_from_here">Read from here</string>
+    <string name="read_aloud_selected">Read selected</string>
 </resources>
