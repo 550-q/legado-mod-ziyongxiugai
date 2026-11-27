@@ -21,6 +21,7 @@ import io.legado.app.lib.dialogs.alert
 import io.legado.app.lib.permission.Permissions
 import io.legado.app.lib.permission.PermissionsCompat
 import io.legado.app.lib.theme.backgroundColor
+import io.legado.app.ui.book.group.GroupSelectDialog
 import io.legado.app.ui.book.import.BaseImportBookActivity
 import io.legado.app.ui.file.HandleFileContract
 import io.legado.app.ui.widget.SelectActionBar
@@ -31,6 +32,7 @@ import io.legado.app.utils.isContentScheme
 import io.legado.app.utils.isUri
 import io.legado.app.utils.launch
 import io.legado.app.utils.putPrefInt
+import io.legado.app.utils.showDialogFragment
 import io.legado.app.utils.visible
 import kotlinx.coroutines.Dispatchers.IO
 import kotlinx.coroutines.Dispatchers.Main
@@ -46,11 +48,14 @@ import java.io.File
 class ImportBookActivity : BaseImportBookActivity<ImportBookViewModel>(),
     PopupMenu.OnMenuItemClickListener,
     ImportBookAdapter.CallBack,
-    SelectActionBar.CallBack {
+    SelectActionBar.CallBack,
+    GroupSelectDialog.CallBack {
 
     override val viewModel by viewModels<ImportBookViewModel>()
     private val adapter by lazy { ImportBookAdapter(this, this) }
     private var scanDocJob: Job? = null
+    private var pendingImportSelection: HashSet<ImportBook> = hashSetOf()
+    private var importGroupId: Long = 0L
 
     private val selectFolder = registerForActivityResult(HandleFileContract()) {
         it.uri?.let { uri ->
@@ -60,6 +65,7 @@ class ImportBookActivity : BaseImportBookActivity<ImportBookViewModel>(),
     }
 
     override fun onActivityCreated(savedInstanceState: Bundle?) {
+        importGroupId = intent.getLongExtra(EXTRA_GROUP_ID, 0L).coerceAtLeast(0L)
         searchView.queryHint = getString(R.string.screen) + " • " + getString(R.string.local_book)
         onBackPressedDispatcher.addCallback(this) {
             if (!goBackDir()) {
@@ -119,11 +125,35 @@ class ImportBookActivity : BaseImportBookActivity<ImportBookViewModel>(),
 
     @SuppressLint("NotifyDataSetChanged")
     override fun onClickSelectBarMainAction() {
-        viewModel.addToBookshelf(adapter.selected) {
-            adapter.selected.forEach {
+        val selected = HashSet(adapter.selected)
+        if (selected.isEmpty()) return
+        pendingImportSelection = selected
+        // 放入书架前先选分组，弹窗带「可多选」提示
+        showDialogFragment(
+            GroupSelectDialog(
+                groupId = importGroupId,
+                requestCode = REQUEST_CODE_IMPORT_GROUP,
+                showMultiHint = true
+            )
+        )
+    }
+
+    override fun upGroup(requestCode: Int, groupId: Long) {
+        if (requestCode != REQUEST_CODE_IMPORT_GROUP) return
+        val selected = pendingImportSelection
+        pendingImportSelection = hashSetOf()
+        if (selected.isEmpty()) return
+        importGroupId = groupId
+        addToBookshelf(selected, groupId)
+    }
+
+    @SuppressLint("NotifyDataSetChanged")
+    private fun addToBookshelf(selected: HashSet<ImportBook>, groupId: Long) {
+        viewModel.addToBookshelf(selected, groupId) {
+            selected.forEach {
+                adapter.selected.remove(it)
                 it.isOnBookShelf = true
             }
-            adapter.selected.clear()
             adapter.notifyDataSetChanged()
         }
     }
@@ -324,4 +354,8 @@ class ImportBookActivity : BaseImportBookActivity<ImportBookViewModel>(),
         }
     }
 
+    companion object {
+        const val EXTRA_GROUP_ID = "groupId"
+        private const val REQUEST_CODE_IMPORT_GROUP = 11
+    }
 }

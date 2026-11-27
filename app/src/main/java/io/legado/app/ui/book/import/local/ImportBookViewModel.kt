@@ -90,12 +90,12 @@ class ImportBookViewModel(application: Application) : BaseViewModel(application)
         }.sortedWith(comparator).toList()
     }.flowOn(IO)
 
-    fun addToBookshelf(bookList: HashSet<ImportBook>, finally: () -> Unit) {
+    fun addToBookshelf(bookList: HashSet<ImportBook>, groupId: Long = -1L, finally: () -> Unit) {
         execute {
             val fileUris = bookList.map {
                 it.file.uri
             }
-            LocalBook.importFiles(fileUris)
+            LocalBook.importFiles(fileUris, groupId)
         }.onError {
             context.toastOnUi("添加书架失败，请尝试重新选择文件夹")
             AppLog.put("添加书架失败\n${it.localizedMessage}", it)

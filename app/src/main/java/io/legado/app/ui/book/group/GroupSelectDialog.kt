@@ -25,9 +25,11 @@ import io.legado.app.lib.theme.primaryColor
 import io.legado.app.ui.widget.recycler.ItemTouchCallback
 import io.legado.app.ui.widget.recycler.VerticalDivider
 import io.legado.app.utils.applyTint
+import io.legado.app.utils.gone
 import io.legado.app.utils.setLayout
 import io.legado.app.utils.showDialogFragment
 import io.legado.app.utils.viewbindingdelegate.viewBinding
+import io.legado.app.utils.visible
 import kotlinx.coroutines.flow.conflate
 import kotlinx.coroutines.launch
 
@@ -35,10 +37,11 @@ import kotlinx.coroutines.launch
 class GroupSelectDialog() : BaseDialogFragment(R.layout.dialog_book_group_picker),
     Toolbar.OnMenuItemClickListener {
 
-    constructor(groupId: Long, requestCode: Int = -1) : this() {
+    constructor(groupId: Long, requestCode: Int = -1, showMultiHint: Boolean = false) : this() {
         arguments = Bundle().apply {
             putLong("groupId", groupId)
             putInt("requestCode", requestCode)
+            putBoolean("showMultiHint", showMultiHint)
         }
     }
 
@@ -48,6 +51,7 @@ class GroupSelectDialog() : BaseDialogFragment(R.layout.dialog_book_group_picker
     private val adapter by lazy { GroupAdapter(requireContext()) }
     private val callBack get() = (activity as? CallBack)
     private var groupId: Long = 0
+    private var showMultiHint: Boolean = false
 
     override fun onStart() {
         super.onStart()
@@ -59,6 +63,7 @@ class GroupSelectDialog() : BaseDialogFragment(R.layout.dialog_book_group_picker
         arguments?.let {
             groupId = it.getLong("groupId")
             requestCode = it.getInt("requestCode", -1)
+            showMultiHint = it.getBoolean("showMultiHint", false)
         }
         initView()
         initData()
@@ -69,6 +74,13 @@ class GroupSelectDialog() : BaseDialogFragment(R.layout.dialog_book_group_picker
         binding.toolBar.inflateMenu(R.menu.book_group_manage)
         binding.toolBar.menu.applyTint(requireContext())
         binding.toolBar.setOnMenuItemClickListener(this)
+        if (showMultiHint) {
+            binding.tvHint.visible()
+            binding.tvHint.setText(R.string.group_select_multi_hint)
+            binding.tvHint.setTextColor(requireContext().accentColor)
+        } else {
+            binding.tvHint.gone()
+        }
         binding.recyclerView.layoutManager = LinearLayoutManager(requireContext())
         binding.recyclerView.addItemDecoration(VerticalDivider(requireContext()))
         binding.recyclerView.adapter = adapter

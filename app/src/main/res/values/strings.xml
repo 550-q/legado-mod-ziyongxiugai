@@ -1343,4 +1343,5 @@
     <string name="click_image_way">点击图片方式</string>
     <string name="auto_update_summary">每天自动检查软件是否更新</string>
     <string name="shibboleth">口令</string>
+    <string name="group_select_multi_hint">Multiple groups can be selected. Leave all unchecked to use the current group.</string>
 </resources>
