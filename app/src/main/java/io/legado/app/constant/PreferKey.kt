@@ -124,6 +124,8 @@ object PreferKey {
     const val nightBrightness = "nightBrightness"
     const val expandTextMenu = "expandTextMenu"
     const val contentSelectActionsOrder = "contentSelectActionsOrder"
+    const val contentSelectActionsDisabled = "contentSelectActionsDisabled"
+    const val contentSelectProcessTextOrder = "contentSelectProcessTextOrder"
     const val contentSelectProcessTextDisabled = "contentSelectProcessTextDisabled"
     const val doublePageHorizontal = "doubleHorizontalPage"
     const val readUrlOpenInBrowser = "readUrlInBrowser"

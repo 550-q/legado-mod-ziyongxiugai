@@ -110,10 +110,20 @@ class TextActionMenu(private val context: Context, private val callBack: CallBac
      * 按用户保存的顺序排列内置动作；没有保存过就用菜单默认顺序。
      */
     private fun orderedBuiltInItems(): List<MenuItemImpl> {
+        val disabled = ContentSelectMenuConfig.disabledBuiltIn(context)
+        val enabled = builtInItems.filter {
+            context.resources.getResourceEntryName(it.itemId) !in disabled
+        }
+        // 全关掉时至少留「复制」，否则长按条会空着没法选文字
+        if (enabled.isEmpty()) {
+            return builtInItems.filter {
+                context.resources.getResourceEntryName(it.itemId) == "menu_copy"
+            }.ifEmpty { builtInItems }
+        }
         val order = ContentSelectMenuConfig.savedOrder(context)
-        if (order.isEmpty()) return builtInItems
+        if (order.isEmpty()) return enabled
         val index = order.withIndex().associate { it.value to it.index }
-        return builtInItems.sortedBy {
+        return enabled.sortedBy {
             index[context.resources.getResourceEntryName(it.itemId)] ?: Int.MAX_VALUE
         }
     }
@@ -126,9 +136,17 @@ class TextActionMenu(private val context: Context, private val callBack: CallBac
         val menu = MenuBuilder(context)
         onInitializeMenu(menu)
         val disabled = ContentSelectMenuConfig.disabledProcessText(context)
-        return menu.visibleItems.filter { item ->
+        val enabled = menu.visibleItems.filter { item ->
             val component = item.intent?.component
             component == null || "${component.packageName}/${component.className}" !in disabled
+        }
+        val order = ContentSelectMenuConfig.processTextOrder(context)
+        if (order.isEmpty()) return enabled
+        val index = order.withIndex().associate { it.value to it.index }
+        return enabled.sortedBy { item ->
+            val component = item.intent?.component
+            if (component == null) Int.MAX_VALUE
+            else index["${component.packageName}/${component.className}"] ?: Int.MAX_VALUE
         }
     }
 

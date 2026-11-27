@@ -73,10 +73,38 @@ object ContentSelectMenuConfig {
     /**
      * 默认全部启用，只有用户手动取消勾选的才记在「禁用」集合里。
      */
+    fun disabledBuiltIn(context: Context): Set<String> =
+        context.getPrefStringSet(PreferKey.contentSelectActionsDisabled).orEmpty()
+
+    fun saveDisabledBuiltIn(context: Context, names: Set<String>) {
+        context.putPrefStringSet(PreferKey.contentSelectActionsDisabled, names.toMutableSet())
+    }
+
+    /**
+     * 默认全部启用，只有用户手动取消勾选的才记在「禁用」集合里。
+     */
     fun disabledProcessText(context: Context): Set<String> =
         context.getPrefStringSet(PreferKey.contentSelectProcessTextDisabled).orEmpty()
 
     fun saveDisabledProcessText(context: Context, keys: Set<String>) {
         context.putPrefStringSet(PreferKey.contentSelectProcessTextDisabled, keys.toMutableSet())
+    }
+
+    fun processTextOrder(context: Context): List<String> {
+        val raw = context.getPrefString(PreferKey.contentSelectProcessTextOrder).orEmpty()
+        if (raw.isBlank()) return emptyList()
+        return raw.split(",").filter { it.isNotBlank() }
+    }
+
+    fun saveProcessTextOrder(context: Context, keys: List<String>) {
+        context.putPrefString(PreferKey.contentSelectProcessTextOrder, keys.joinToString(","))
+    }
+
+    /** 清空自定义顺序与开关，恢复成出厂状态 */
+    fun resetToDefault(context: Context) {
+        context.putPrefString(PreferKey.contentSelectActionsOrder, "")
+        context.putPrefString(PreferKey.contentSelectProcessTextOrder, "")
+        context.putPrefStringSet(PreferKey.contentSelectActionsDisabled, mutableSetOf())
+        context.putPrefStringSet(PreferKey.contentSelectProcessTextDisabled, mutableSetOf())
     }
 }

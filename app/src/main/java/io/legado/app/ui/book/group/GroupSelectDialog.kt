@@ -99,7 +99,8 @@ class GroupSelectDialog() : BaseDialogFragment(R.layout.dialog_book_group_picker
 
     private fun initData() {
         lifecycleScope.launch {
-            appDb.bookGroupDao.flowSelect().conflate().collect {
+            // 与「分组管理」同源：自带筛选分组也列出来，只是不能勾选
+            appDb.bookGroupDao.flowAll().conflate().collect {
                 adapter.setItems(it)
             }
         }
@@ -132,8 +133,12 @@ class GroupSelectDialog() : BaseDialogFragment(R.layout.dialog_book_group_picker
         ) {
             binding.run {
                 root.setBackgroundColor(context.backgroundColor)
-                cbGroup.text = item.groupName
-                cbGroup.isChecked = (groupId and item.groupId) > 0
+                val isSystem = item.groupId < 0
+                cbGroup.text = if (isSystem) item.getManageName(context) else item.groupName
+                cbGroup.isChecked = !isSystem && (groupId and item.groupId) > 0
+                cbGroup.isEnabled = !isSystem
+                cbGroup.alpha = if (isSystem) 0.6f else 1f
+                tvSystemTip.visibility = if (isSystem) android.view.View.VISIBLE else android.view.View.GONE
             }
         }
 

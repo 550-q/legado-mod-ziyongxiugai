@@ -9,6 +9,15 @@
     android:paddingStart="8dp"
     android:paddingEnd="8dp">
 
+    <TextView
+        android:id="@+id/tv_drag"
+        android:layout_width="24dp"
+        android:layout_height="wrap_content"
+        android:gravity="center"
+        android:text="≡"
+        android:textSize="18sp"
+        tools:ignore="HardcodedText" />
+
     <CheckBox
         android:id="@+id/cb_enable"
         android:layout_width="wrap_content"

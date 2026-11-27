@@ -1240,4 +1240,5 @@
     <string name="read_aloud_selected">朗讀選取</string>
     <string name="read_jump_history_title">恢復閱讀位置</string>
     <string name="read_jump_history_hint">點選記錄恢復到對應位置；點「退出」返回書架</string>
+    <string name="group_system_tip">系統分組</string>
 </resources>

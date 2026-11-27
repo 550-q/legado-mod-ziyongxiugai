@@ -1,6 +1,8 @@
 package io.legado.app.ui.book.read.config
 
 import android.content.Context
+import android.os.Bundle
+import android.view.View
 import android.view.ViewGroup
 import androidx.recyclerview.widget.ItemTouchHelper
 import androidx.recyclerview.widget.LinearLayoutManager
@@ -21,13 +23,15 @@ import io.legado.app.utils.setLayout
 import io.legado.app.utils.viewbindingdelegate.viewBinding
 
 /**
- * 正文长按条编辑：拖动调整动作顺序，勾选要显示的系统「文字处理」动作。
+ * 正文长按条编辑：内置动作与系统「文字处理」动作都能拖动排序、都能勾选开关，
+ * 左下角「恢复默认」清掉自定义顺序与开关。
  */
 class ContentSelectMenuConfigDialog : BaseDialogFragment(R.layout.dialog_content_select_menu_config) {
 
     private val binding by viewBinding(DialogContentSelectMenuConfigBinding::bind)
     private val actionAdapter by lazy { ActionAdapter(requireContext()) }
     private val processAdapter by lazy { ProcessAdapter(requireContext()) }
+    private val enabledActions = hashMapOf<String, Boolean>()
     private val enabledProcessText = hashMapOf<String, Boolean>()
 
     override fun onStart() {
@@ -35,13 +39,39 @@ class ContentSelectMenuConfigDialog : BaseDialogFragment(R.layout.dialog_content
         setLayout(0.92f, 0.8f)
     }
 
-    override fun onFragmentCreated(view: android.view.View, savedInstanceState: android.os.Bundle?) {
+    override fun onFragmentCreated(view: View, savedInstanceState: Bundle?) {
         binding.root.setBackgroundColor(requireContext().backgroundColor)
         binding.tvActionsTitle.setTextColor(requireContext().primaryTextColor)
         binding.tvProcessTitle.setTextColor(requireContext().primaryTextColor)
+        binding.tvReset.setTextColor(requireContext().primaryTextColor)
         binding.tvCancel.setTextColor(requireContext().primaryTextColor)
         binding.tvOk.setTextColor(requireContext().accentColor)
 
+        binding.recyclerActions.layoutManager = LinearLayoutManager(requireContext())
+        binding.recyclerActions.adapter = actionAdapter
+        ItemTouchHelper(ItemTouchCallback(actionAdapter).apply { isCanDrag = true })
+            .attachToRecyclerView(binding.recyclerActions)
+
+        binding.recyclerProcess.layoutManager = LinearLayoutManager(requireContext())
+        binding.recyclerProcess.adapter = processAdapter
+        ItemTouchHelper(ItemTouchCallback(processAdapter).apply { isCanDrag = true })
+            .attachToRecyclerView(binding.recyclerProcess)
+
+        loadConfig()
+
+        binding.tvReset.setOnClickListener {
+            ContentSelectMenuConfig.resetToDefault(requireContext())
+            loadConfig()
+            (activity as? ReadBookActivity)?.textActionMenu?.upMenu()
+        }
+        binding.tvCancel.setOnClickListener { dismissAllowingStateLoss() }
+        binding.tvOk.setOnClickListener {
+            save(requireContext())
+            dismissAllowingStateLoss()
+        }
+    }
+
+    private fun loadConfig() {
         val context = requireContext()
         val savedOrder = ContentSelectMenuConfig.savedOrder(context)
         val actions = ContentSelectMenuConfig.builtInActions(context)
@@ -51,35 +81,48 @@ class ContentSelectMenuConfigDialog : BaseDialogFragment(R.layout.dialog_content
             val index = savedOrder.withIndex().associate { it.value to it.index }
             actions.sortedBy { index[it.name] ?: Int.MAX_VALUE }
         }
+        val disabledActions = ContentSelectMenuConfig.disabledBuiltIn(context)
+        enabledActions.clear()
+        ordered.forEach { enabledActions[it.name] = it.name !in disabledActions }
+
+        val processActions = ContentSelectMenuConfig.processTextActions(context)
+        val processOrder = ContentSelectMenuConfig.processTextOrder(context)
+        val orderedProcess = if (processOrder.isEmpty()) {
+            processActions
+        } else {
+            val index = processOrder.withIndex().associate { it.value to it.index }
+            processActions.sortedBy { index[it.key] ?: Int.MAX_VALUE }
+        }
         val disabled = ContentSelectMenuConfig.disabledProcessText(context)
-        ContentSelectMenuConfig.processTextActions(context).forEach {
+        enabledProcessText.clear()
+        orderedProcess.forEach {
             enabledProcessText[it.key] = it.key !in disabled
         }
 
-        binding.recyclerActions.layoutManager = LinearLayoutManager(context)
-        binding.recyclerActions.adapter = actionAdapter
         actionAdapter.setItems(ordered)
-        val touchCallback = ItemTouchCallback(actionAdapter).apply { isCanDrag = true }
-        ItemTouchHelper(touchCallback).attachToRecyclerView(binding.recyclerActions)
-
-        binding.recyclerProcess.layoutManager = LinearLayoutManager(context)
-        binding.recyclerProcess.adapter = processAdapter
-        processAdapter.setItems(ContentSelectMenuConfig.processTextActions(context))
-
-        binding.tvCancel.setOnClickListener { dismissAllowingStateLoss() }
-        binding.tvOk.setOnClickListener {
-            save(context)
-            dismissAllowingStateLoss()
-        }
+        processAdapter.setItems(orderedProcess)
     }
 
     private fun save(context: Context) {
         ContentSelectMenuConfig.saveOrder(context, actionAdapter.getItems().map { it.name })
-        val disabled = processAdapter.getItems()
-            .filter { enabledProcessText[it.key] == false }
-            .map { it.key }
-            .toSet()
-        ContentSelectMenuConfig.saveDisabledProcessText(context, disabled)
+        ContentSelectMenuConfig.saveDisabledBuiltIn(
+            context,
+            actionAdapter.getItems()
+                .filter { enabledActions[it.name] == false }
+                .map { it.name }
+                .toSet()
+        )
+        ContentSelectMenuConfig.saveProcessTextOrder(
+            context,
+            processAdapter.getItems().map { it.key }
+        )
+        ContentSelectMenuConfig.saveDisabledProcessText(
+            context,
+            processAdapter.getItems()
+                .filter { enabledProcessText[it.key] == false }
+                .map { it.key }
+                .toSet()
+        )
         (activity as? ReadBookActivity)?.textActionMenu?.upMenu()
     }
 
@@ -98,10 +141,21 @@ class ContentSelectMenuConfigDialog : BaseDialogFragment(R.layout.dialog_content
         ) {
             binding.tvTitle.text = item.title
             binding.tvTitle.setTextColor(context.primaryTextColor)
+            binding.tvTitle.alpha = if (enabledActions[item.name] != false) 1f else 0.4f
             binding.tvDrag.setTextColor(context.primaryTextColor)
+            binding.cbEnable.isChecked = enabledActions[item.name] != false
         }
 
         override fun registerListener(holder: ItemViewHolder, binding: ItemContentSelectActionBinding) {
+            binding.cbEnable.setOnClickListener {
+                val item = getItem(holder.layoutPosition) ?: return@setOnClickListener
+                val checked = !(enabledActions[item.name] ?: true)
+                enabledActions[item.name] = checked
+                notifyItemChanged(holder.layoutPosition)
+            }
+            binding.root.setOnClickListener {
+                binding.cbEnable.performClick()
+            }
         }
 
         override fun swap(srcPosition: Int, targetPosition: Int): Boolean {
@@ -111,7 +165,8 @@ class ContentSelectMenuConfigDialog : BaseDialogFragment(R.layout.dialog_content
     }
 
     private inner class ProcessAdapter(context: Context) :
-        RecyclerAdapter<ContentSelectMenuConfig.ProcessTextAction, ItemContentSelectProcessBinding>(context) {
+        RecyclerAdapter<ContentSelectMenuConfig.ProcessTextAction, ItemContentSelectProcessBinding>(context),
+        ItemTouchCallback.Callback {
 
         override fun getViewBinding(parent: ViewGroup): ItemContentSelectProcessBinding =
             ItemContentSelectProcessBinding.inflate(inflater, parent, false)
@@ -124,6 +179,8 @@ class ContentSelectMenuConfigDialog : BaseDialogFragment(R.layout.dialog_content
         ) {
             binding.tvTitle.text = item.label
             binding.tvTitle.setTextColor(context.primaryTextColor)
+            binding.tvTitle.alpha = if (enabledProcessText[item.key] != false) 1f else 0.4f
+            binding.tvDrag.setTextColor(context.primaryTextColor)
             binding.cbEnable.isChecked = enabledProcessText[item.key] != false
         }
 
@@ -132,11 +189,16 @@ class ContentSelectMenuConfigDialog : BaseDialogFragment(R.layout.dialog_content
                 val item = getItem(holder.layoutPosition) ?: return@setOnClickListener
                 val checked = !(enabledProcessText[item.key] ?: true)
                 enabledProcessText[item.key] = checked
-                binding.cbEnable.isChecked = checked
+                notifyItemChanged(holder.layoutPosition)
             }
             binding.root.setOnClickListener {
                 binding.cbEnable.performClick()
             }
+        }
+
+        override fun swap(srcPosition: Int, targetPosition: Int): Boolean {
+            swapItem(srcPosition, targetPosition)
+            return true
         }
     }
 }
