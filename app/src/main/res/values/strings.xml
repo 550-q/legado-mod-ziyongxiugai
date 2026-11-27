@@ -1360,4 +1360,6 @@
     <string name="read_aloud_selected">Read selected</string>
     <string name="read_jump_history_title">Restore reading position</string>
     <string name="read_jump_history_hint">Tap a record to restore; tap Exit to leave the book</string>
+    <string name="read_aloud_from_here_tip">Switched to: read from the selection onward</string>
+    <string name="read_aloud_selected_tip">Switched to: read selected text</string>
 </resources>

@@ -1253,4 +1253,6 @@
     <string name="read_aloud_selected">朗读选中</string>
     <string name="read_jump_history_title">恢复阅读位置</string>
     <string name="read_jump_history_hint">点选记录恢复到对应位置；点「退出」返回书架</string>
+    <string name="read_aloud_from_here_tip">已切换为：从此朗读（从选择处开始一直读）</string>
+    <string name="read_aloud_selected_tip">已切换为：朗读选中的文字</string>
 </resources>
