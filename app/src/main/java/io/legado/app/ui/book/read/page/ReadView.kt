@@ -396,13 +396,27 @@ class ReadView(context: Context, attrs: AttributeSet) :
     }
 
     /**
-     * 选择文字时在手指上方显示放大镜（Android 9+），方便对准行列位置。
+     * 选择文字时显示放大镜（Android 9+，200% 放大）。
+     * 默认放在手指/手柄上方；贴近屏幕顶部放不下时翻到下方，避免被状态栏裁掉。
      */
     private fun showSelectionMagnifier(x: Float, y: Float) {
         if (Build.VERSION.SDK_INT < Build.VERSION_CODES.P) return
         runCatching {
-            val magnifier = selectionMagnifier
-                ?: android.widget.Magnifier(this).also { selectionMagnifier = it }
+            val density = resources.displayMetrics.density
+            val magnifierWidth = (200 * density).toInt()
+            val magnifierHeight = (72 * density).toInt()
+            val gap = (16 * density).toInt()
+            val magnifier = selectionMagnifier ?: android.widget.Magnifier.Builder(this)
+                .setSize(magnifierWidth, magnifierHeight)
+                .setZoom(2f)
+                .build()
+                .also { selectionMagnifier = it }
+            // 上方留不出放大镜的高度时，改成显示在手柄下方
+            if (y < magnifierHeight + gap * 2) {
+                magnifier.setOffset(0f, (magnifierHeight + gap).toFloat())
+            } else {
+                magnifier.setOffset(0f, 0f)
+            }
             magnifier.show(x, y)
         }
     }
