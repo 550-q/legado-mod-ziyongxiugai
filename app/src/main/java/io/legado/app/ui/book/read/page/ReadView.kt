@@ -69,6 +69,9 @@ class ReadView(context: Context, attrs: AttributeSet) :
     private var pressDown = false
     private var isMove = false
 
+    /** 文字选择时的放大镜（Android 9+） */
+    private var selectionMagnifier: android.widget.Magnifier? = null
+
     //起始点
     var startX: Float = 0f
     var startY: Float = 0f
@@ -222,6 +225,7 @@ class ReadView(context: Context, attrs: AttributeSet) :
                     removeCallbacks(longPressRunnable)
                     if (isTextSelected) {
                         selectText(event.x, event.y)
+                        showSelectionMagnifier(event.x, event.y)
                     } else {
                         pageDelegate?.onTouch(event)
                     }
@@ -230,6 +234,7 @@ class ReadView(context: Context, attrs: AttributeSet) :
 
             MotionEvent.ACTION_UP -> {
                 callBack.screenOffTimerStart()
+                dismissSelectionMagnifier()
                 removeCallbacks(longPressRunnable)
                 if (!pressDown) return true
                 pressDown = false
@@ -250,6 +255,7 @@ class ReadView(context: Context, attrs: AttributeSet) :
             }
 
             MotionEvent.ACTION_CANCEL -> {
+                dismissSelectionMagnifier()
                 removeCallbacks(longPressRunnable)
                 if (!pressDown) return true
                 pressDown = false
@@ -266,6 +272,7 @@ class ReadView(context: Context, attrs: AttributeSet) :
     }
 
     fun cancelSelect(clearSearchResult: Boolean = false) {
+        dismissSelectionMagnifier()
         if (isTextSelected) {
             curPage.cancelSelect(clearSearchResult)
             isTextSelected = false
@@ -383,7 +390,26 @@ class ReadView(context: Context, attrs: AttributeSet) :
                 }
                 curPage.selectStartMoveIndex(startPos)
                 curPage.selectEndMoveIndex(endPos)
+                showSelectionMagnifier(startX, startY)
             }
+        }
+    }
+
+    /**
+     * 选择文字时在手指上方显示放大镜（Android 9+），方便对准行列位置。
+     */
+    private fun showSelectionMagnifier(x: Float, y: Float) {
+        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.P) return
+        runCatching {
+            val magnifier = selectionMagnifier
+                ?: android.widget.Magnifier(this).also { selectionMagnifier = it }
+            magnifier.show(x, y)
+        }
+    }
+
+    private fun dismissSelectionMagnifier() {
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.P) {
+            selectionMagnifier?.dismiss()
         }
     }
 
@@ -495,6 +521,7 @@ class ReadView(context: Context, attrs: AttributeSet) :
      * 销毁事件
      */
     fun onDestroy() {
+        dismissSelectionMagnifier()
         pageDelegate?.onDestroy()
         curPage.cancelSelect()
         invalidateTextPage()

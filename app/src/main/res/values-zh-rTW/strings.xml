@@ -1232,13 +1232,12 @@
     <string name="timer_custom_invalid">請輸入 1~9999 之間的數字</string>
     <string name="pause_read_aloud_after_timer_title">計時結束後暫停朗讀</string>
     <string name="pause_read_aloud_after_timer_summary">計時到點後暫停朗讀，關閉則停止朗讀</string>
-    <string name="content_select_menu_config">正文長按列編輯</string>
-    <string name="content_select_menu_config_summary">調整長按動作順序，勾選系統文字處理動作</string>
+    <string name="content_select_menu_config">文字選擇選單編輯</string>
+    <string name="content_select_menu_config_summary">調整文字選擇選單的動作順序與顯示開關</string>
     <string name="content_select_order_title">動作順序（長按拖曳）</string>
     <string name="content_select_process_text_title">系統文字處理動作（其他應用）</string>
     <string name="read_aloud_from_here">從此朗讀</string>
     <string name="read_aloud_selected">朗讀選取</string>
     <string name="read_jump_history_title">恢復閱讀位置</string>
     <string name="read_jump_history_hint">點選記錄恢復到對應位置；點「退出」返回書架</string>
-    <string name="group_system_tip">系統分組</string>
 </resources>

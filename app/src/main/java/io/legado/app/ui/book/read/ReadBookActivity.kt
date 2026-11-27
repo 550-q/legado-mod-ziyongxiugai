@@ -858,12 +858,15 @@ class ReadBookActivity : BaseReadBookActivity(),
      */
     override fun onMenuItemSelected(itemId: Int): Boolean {
         when (itemId) {
-            R.id.menu_aloud -> when (AppConfig.contentSelectSpeakMod) {
-                1 -> lifecycleScope.launch {
-                    binding.readView.aloudStartSelect()
+            R.id.menu_aloud -> {
+                // 与菜单文案一致：有选中就只读选中内容，没有才从光标处往下读
+                if (binding.readView.getSelectText().isBlank()) {
+                    lifecycleScope.launch {
+                        binding.readView.aloudStartSelect()
+                    }
+                } else {
+                    speak(binding.readView.getSelectText())
                 }
-
-                else -> speak(binding.readView.getSelectText())
             }
 
             R.id.menu_bookmark -> binding.readView.curPage.let {

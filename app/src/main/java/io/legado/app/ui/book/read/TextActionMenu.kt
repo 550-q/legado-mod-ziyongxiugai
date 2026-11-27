@@ -25,9 +25,7 @@ import io.legado.app.constant.AppLog
 import io.legado.app.constant.PreferKey
 import io.legado.app.databinding.ItemTextBinding
 import io.legado.app.databinding.PopupActionMenuBinding
-import io.legado.app.help.config.AppConfig
 import io.legado.app.help.config.ContentSelectMenuConfig
-import io.legado.app.service.BaseReadAloudService
 import io.legado.app.utils.getPrefBoolean
 import io.legado.app.utils.gone
 import io.legado.app.utils.isAbsUrl
@@ -159,60 +157,27 @@ class TextActionMenu(private val context: Context, private val callBack: CallBac
         endX: Int,
         endBottomY: Int
     ) {
-        if (expandTextMenu) {
-            when {
-                startTopY > 500 -> {
-                    showAtLocation(
-                        view,
-                        Gravity.BOTTOM or Gravity.START,
-                        startX,
-                        windowHeight - startTopY
-                    )
-                }
-
-                endBottomY - startBottomY > 500 -> {
-                    showAtLocation(view, Gravity.TOP or Gravity.START, startX, startBottomY)
-                }
-
-                else -> {
-                    showAtLocation(view, Gravity.TOP or Gravity.START, endX, endBottomY)
-                }
-            }
-        } else {
-            contentView.measure(
-                View.MeasureSpec.UNSPECIFIED,
-                View.MeasureSpec.UNSPECIFIED,
-            )
-            val popupHeight = contentView.measuredHeight
-            when {
-                startBottomY > 500 -> {
-                    showAtLocation(
-                        view,
-                        Gravity.TOP or Gravity.START,
-                        startX,
-                        startTopY - popupHeight
-                    )
-                }
-
-                endBottomY - startBottomY > 500 -> {
-                    showAtLocation(
-                        view,
-                        Gravity.TOP or Gravity.START,
-                        startX,
-                        startBottomY
-                    )
-                }
-
-                else -> {
-                    showAtLocation(
-                        view,
-                        Gravity.TOP or Gravity.START,
-                        endX,
-                        endBottomY
-                    )
-                }
+        contentView.measure(
+            View.MeasureSpec.UNSPECIFIED,
+            View.MeasureSpec.UNSPECIFIED,
+        )
+        val density = context.resources.displayMetrics.density
+        val margin = (6 * density).toInt()
+        val popupWidth = contentView.measuredWidth
+        val popupHeight = contentView.measuredHeight
+        // 横向不要超出屏幕
+        val maxX = (view.width - popupWidth - margin).coerceAtLeast(margin)
+        val x = startX.coerceIn(margin, maxX)
+        // 优先放在选区上方（底边贴着选中第一行的行顶），放不下再放到选区下方，
+        // 两边都放不下才夹在屏幕内，避免像原来那样压在选中的文字上。
+        var y = startTopY - popupHeight - margin
+        if (y < margin) {
+            y = endBottomY + margin
+            if (y + popupHeight > windowHeight - margin) {
+                y = (windowHeight - popupHeight - margin).coerceAtLeast(margin)
             }
         }
+        showAtLocation(view, Gravity.TOP or Gravity.START, x, y)
     }
 
     inner class Adapter(context: Context) :
@@ -234,10 +199,11 @@ class TextActionMenu(private val context: Context, private val callBack: CallBac
         ) {
             with(binding) {
                 textView.text = if (item.itemId == R.id.menu_aloud) {
-                    if (BaseReadAloudService.isRun || AppConfig.contentSelectSpeakMod == 1) {
-                        context.getString(R.string.read_aloud_from_here)
-                    } else {
+                    // 有选中内容时只读这一段，没有选中才从光标处一直往下读
+                    if (callBack.selectedText.isNotBlank()) {
                         context.getString(R.string.read_aloud_selected)
+                    } else {
+                        context.getString(R.string.read_aloud_from_here)
                     }
                 } else {
                     item.title
@@ -253,16 +219,6 @@ class TextActionMenu(private val context: Context, private val callBack: CallBac
                     }
                 }
                 callBack.onMenuActionFinally()
-            }
-            holder.itemView.setOnLongClickListener {
-                if (AppConfig.contentSelectSpeakMod == 0) {
-                    AppConfig.contentSelectSpeakMod = 1
-                    context.toastOnUi("切换为从选择的地方开始一直朗读")
-                } else {
-                    AppConfig.contentSelectSpeakMod = 0
-                    context.toastOnUi("切换为朗读选择内容")
-                }
-                true
             }
         }
     }

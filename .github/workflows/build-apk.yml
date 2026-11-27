@@ -8,7 +8,7 @@ on:
   workflow_dispatch:
     inputs:
       version_name:
-        description: "versionName，留空自动用 3.MMDDHH"
+        description: "versionName，留空自动用 3.YY.MMDDHH"
         required: false
         default: ""
       version_code:
@@ -56,12 +56,12 @@ jobs:
         run: |
           NAME="${{ inputs.version_name }}"
           if [ -z "$NAME" ]; then
-            NAME="3.$(TZ=Asia/Shanghai date +%m%d%H)"
+            NAME="3.$(TZ=Asia/Shanghai date +%y.%m%d%H)"
           fi
           CODE="${{ inputs.version_code }}"
           if [ -z "$CODE" ]; then
             # Unix 分钟数 + 10000000：约 3990 万，既高于 legado-E 官方的 10000+提交数，
-            # 也高于旧 Archive 包已装的 39928418，两种包名都能直接覆盖安装。
+            
             CODE=$(( $(date -u +%s) / 60 + 10000000 ))
           fi
           echo "name=$NAME" >> "$GITHUB_OUTPUT"
