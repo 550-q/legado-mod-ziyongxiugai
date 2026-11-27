@@ -1,0 +1,119 @@
+name: Build APK (legado-E)
+
+# 手动触发：Actions -> Build APK (legado-E) -> Run workflow
+# 推送到 mod/legado-e 也会自动构建，方便改完立刻拿到包验证。
+# 包名沿用 legado-E 正式版 io.legado.app.release，签名用仓库内 legado.jks（与 legado-E 官方包同签名）。
+
+on:
+  workflow_dispatch:
+    inputs:
+      version_name:
+        description: "versionName，留空自动用 3.MMDDHH"
+        required: false
+        default: ""
+      version_code:
+        description: "versionCode，留空自动生成（Unix 分钟数+10000000）"
+        required: false
+        default: ""
+      create_release:
+        description: "构建完成后自动发布到 Releases"
+        required: false
+        type: boolean
+        default: false
+  push:
+    branches:
+      - mod/legado-e
+
+permissions:
+  contents: write
+
+concurrency:
+  group: build-apk-e-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    timeout-minutes: 90
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Set up JDK 17
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: 17
+
+      - name: Grant gradlew permission
+        run: chmod +x gradlew
+
+      - name: Resolve version
+        id: ver
+        run: |
+          NAME="${{ inputs.version_name }}"
+          if [ -z "$NAME" ]; then
+            NAME="3.$(TZ=Asia/Shanghai date +%m%d%H)"
+          fi
+          CODE="${{ inputs.version_code }}"
+          if [ -z "$CODE" ]; then
+            # Unix 分钟数 + 10000000：约 3990 万，既高于 legado-E 官方的 10000+提交数，
+            # 也高于旧 Archive 包已装的 39928418，两种包名都能直接覆盖安装。
+            CODE=$(( $(date -u +%s) / 60 + 10000000 ))
+          fi
+          echo "name=$NAME" >> "$GITHUB_OUTPUT"
+          echo "code=$CODE" >> "$GITHUB_OUTPUT"
+          echo "本次 versionName=$NAME versionCode=$CODE" >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Prepare signing key
+        run: |
+          cp .github/workflows/legado.jks app/legado.jks
+          ls -l app/legado.jks
+
+      - name: Build release APK
+        env:
+          GRADLE_OPTS: >-
+            -Dorg.gradle.jvmargs=-XX:+UseParallelGC\ -Xmx4g\ -Xms256m\ -XX:MaxMetaspaceSize=768m\ -Dfile.encoding=UTF-8
+            -Dorg.gradle.workers.max=2
+        run: |
+          mkdir -p out
+          ./gradlew :app:assembleAppRelease \
+            -PVERSION_NAME=${{ steps.ver.outputs.name }} \
+            -PVERSION_CODE=${{ steps.ver.outputs.code }} \
+            -PRELEASE_STORE_FILE=legado.jks \
+            -PRELEASE_STORE_PASSWORD=gedoor_legado \
+            -PRELEASE_KEY_ALIAS=legado \
+            -PRELEASE_KEY_PASSWORD=gedoor_legado \
+            --no-daemon --max-workers=2 --stacktrace
+          find app/build/outputs/apk -type f -name '*.apk' -exec cp {} out/ \;
+          ls -lh out
+
+      - name: Upload APK
+        uses: actions/upload-artifact@v4
+        with:
+          name: legadoE-${{ steps.ver.outputs.code }}
+          path: out/*.apk
+          if-no-files-found: error
+
+      - name: Publish Release
+        if: ${{ inputs.create_release }}
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          TAG="e-apk-${{ steps.ver.outputs.code }}"
+          TITLE="阅读 legado-E Mod ${{ steps.ver.outputs.name }} (${{ steps.ver.outputs.code }})"
+          cat > release-notes.md <<EOF
+          versionName: ${{ steps.ver.outputs.name }}
+          versionCode: ${{ steps.ver.outputs.code }}
+          package: io.legado.app.release
+          Commit: ${{ github.sha }}
+          Build: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+          EOF
+          if gh release view "$TAG" -R "${{ github.repository }}" >/dev/null 2>&1; then
+            gh release upload "$TAG" out/*.apk --clobber -R "${{ github.repository }}"
+          else
+            gh release create "$TAG" out/*.apk --title "$TITLE" --notes-file release-notes.md -R "${{ github.repository }}"
+          fi

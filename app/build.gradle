@@ -20,8 +20,9 @@ static def releaseTime() {
 }
 
 def name = "legado"
-def version = "3." + releaseTime()
+def version = project.hasProperty("VERSION_NAME") ? VERSION_NAME : ("3." + releaseTime())
 def gitCommits = Integer.parseInt('git rev-list HEAD --count'.execute().text.trim())
+def buildVersionCode = project.hasProperty("VERSION_CODE") ? VERSION_CODE.toInteger() : (10000 + gitCommits)
 
 android {
     compileSdk = compile_sdk_version
@@ -50,7 +51,7 @@ android {
         applicationId "io.legado.app"
         minSdk 21
         targetSdk 36
-        versionCode 10000 + gitCommits
+        versionCode buildVersionCode
         versionName version
         testInstrumentationRunner "androidx.test.runner.AndroidJUnitRunner"
         project.ext.set("archivesBaseName", name + "_" + version)
