@@ -787,11 +787,16 @@ class ReadBookActivity : BaseReadBookActivity(),
                         )
                     }
                 }
+                // 拖动手柄调整选区时也显示放大镜（和长按选词一致）
+                readView.showSelectionMagnifierAt(event.rawX, event.rawY)
             }
 
-            MotionEvent.ACTION_UP -> {
+            MotionEvent.ACTION_UP, MotionEvent.ACTION_CANCEL -> {
+                readView.hideSelectionMagnifier()
                 readView.curPage.resetReverseCursor()
-                showTextActionMenu()
+                if (event.action == MotionEvent.ACTION_UP) {
+                    showTextActionMenu()
+                }
             }
         }
         return true

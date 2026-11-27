@@ -407,6 +407,17 @@ class ReadView(context: Context, attrs: AttributeSet) :
         }
     }
 
+    /**
+     * 拖动选区手柄时由外部调用：rawX/rawY 是屏幕坐标，这里换算成视图坐标。
+     */
+    fun showSelectionMagnifierAt(rawX: Float, rawY: Float) {
+        val loc = IntArray(2)
+        getLocationOnScreen(loc)
+        showSelectionMagnifier(rawX - loc[0], rawY - loc[1])
+    }
+
+    fun hideSelectionMagnifier() = dismissSelectionMagnifier()
+
     private fun dismissSelectionMagnifier() {
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.P) {
             selectionMagnifier?.dismiss()
