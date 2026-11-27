@@ -58,6 +58,8 @@ import io.legado.app.lib.dialogs.selector
 import io.legado.app.lib.theme.accentColor
 import io.legado.app.model.ReadAloud
 import io.legado.app.model.ReadBook
+import io.legado.app.model.ReadPageSnapshot
+import io.legado.app.model.firstSentenceOfPageText
 import io.legado.app.model.analyzeRule.AnalyzeRule
 import io.legado.app.model.analyzeRule.AnalyzeRule.Companion.setChapter
 import io.legado.app.model.analyzeRule.AnalyzeRule.Companion.setCoroutineContext
@@ -282,9 +284,9 @@ class ReadBookActivity : BaseReadBookActivity(),
                 restoreLastBookProcess()
                 return@addCallback
             }
-            //拦截返回供恢复阅读进度
-            if (ReadBook.lastBookProgress != null && confirmRestoreProcess != false) {
-                restoreLastBookProcess()
+            //有跳转记录时先列出可恢复的阅读位置，点「退出」才真的返回书架
+            if (ReadBook.hasJumpHistory()) {
+                showJumpHistoryDialog()
                 return@addCallback
             }
             if (BaseReadAloudService.isPlay()) {
@@ -1258,24 +1260,84 @@ class ReadBookActivity : BaseReadBookActivity(),
     /* 恢复到 全文搜索/进度条跳转前的位置 */
     private fun restoreLastBookProcess() {
         if (confirmRestoreProcess == true) {
-            ReadBook.restoreLastBookProgress()
+            ReadBook.restoreLatestJumpRecord()
         } else if (confirmRestoreProcess == null) {
             alert(R.string.draw) {
                 setMessage(R.string.restore_last_book_process)
                 yesButton {
                     confirmRestoreProcess = true
-                    ReadBook.restoreLastBookProgress() //恢复启动全文搜索前的进度
+                    ReadBook.restoreLatestJumpRecord() //恢复启动全文搜索前的进度
                 }
                 noButton {
-                    ReadBook.lastBookProgress = null
                     confirmRestoreProcess = false
                 }
                 onCancelled {
-                    ReadBook.lastBookProgress = null
                     confirmRestoreProcess = false
                 }
             }
         }
+    }
+
+    /**
+     * 返回书架时列出跳转记录，点选恢复；点「退出」清记录并返回书架。
+     */
+    private fun showJumpHistoryDialog() {
+        val records = ReadBook.currentJumpHistory()
+        if (records.isEmpty()) {
+            finish()
+            return
+        }
+        val timeFormat = java.text.SimpleDateFormat("HH:mm", java.util.Locale.getDefault())
+        val recordItems = records.map { record ->
+            val countText = if (record.chapterCount > 0) {
+                "${record.chapterIndex + 1}/${record.chapterCount}"
+            } else {
+                "${record.chapterIndex + 1}"
+            }
+            buildString {
+                append(timeFormat.format(java.util.Date(record.recordTime)))
+                append("  ")
+                append(record.chapterTitle)
+                append("（").append(countText).append("）")
+                if (record.pageIndex >= 0 && record.pageCount > 0) {
+                    append(" 第").append(record.pageIndex + 1).append("/")
+                        .append(record.pageCount).append("页")
+                }
+                if (record.snippet.isNotBlank()) {
+                    append("\n").append(record.snippet)
+                }
+            }
+        }
+        alert(R.string.read_jump_history_title) {
+            setMessage(getString(R.string.read_jump_history_hint))
+            items(recordItems) { dialog, index ->
+                dialog.dismiss()
+                ReadBook.restoreJumpRecord(records[index])
+            }
+            neutralButton(R.string.exit) {
+                ReadBook.clearJumpHistory()
+                finish()
+            }
+            negativeButton(R.string.cancel)
+        }
+    }
+
+    override fun currentReadPageSnapshot(): ReadPageSnapshot? {
+        val chapter = ReadBook.curTextChapter ?: return null
+        val chapterIndex = ReadBook.durChapterIndex
+        if (chapterIndex < 0) return null
+        val pageIndex = ReadBook.durPageIndex
+        if (pageIndex < 0) return null
+        val page = chapter.getPage(pageIndex) ?: return null
+        return ReadPageSnapshot(
+            chapterIndex = chapterIndex,
+            chapterPos = ReadBook.durChapterPos,
+            chapterTitle = chapter.title,
+            chapterCount = chapter.chaptersSize,
+            pageIndex = pageIndex,
+            pageCount = chapter.pageSize,
+            snippet = firstSentenceOfPageText(page.text)
+        )
     }
 
     override fun showLogin() {

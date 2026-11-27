@@ -81,8 +81,13 @@ object ReadBook : CoroutineScope by MainScope() {
     private val nextChapterLoadingLock = Mutex()
     var readStartTime: Long = System.currentTimeMillis()
 
-    /* 跳转进度前进度记录 */
-    var lastBookProgress: BookProgress? = null
+    private const val MAX_JUMP_HISTORY = 30
+
+    /**
+     * 跳转历史：目录 / 全文搜索 / 进度条等每次跳转前记录当前页，新记录在最前。
+     * 只保存在内存里，退出阅读界面即清空。
+     */
+    val jumpHistory = java.util.concurrent.CopyOnWriteArrayList<ReadJumpRecord>()
 
     /* web端阅读进度记录 */
     var webBookProgress: BookProgress? = null
@@ -115,7 +120,7 @@ object ReadBook : CoroutineScope by MainScope() {
         callBack?.upMenuView()
         callBack?.upPageAnim()
         upWebBook(book)
-        lastBookProgress = null
+        jumpHistory.clear()
         webBookProgress = null
         TextFile.clear()
         synchronized(this) {
@@ -207,18 +212,103 @@ object ReadBook : CoroutineScope by MainScope() {
         }
     }
 
-    //暂时保存跳转前进度
-    fun saveCurrentBookProgress() {
-        if (lastBookProgress != null) return //避免进度条连续跳转不能覆盖最初的进度记录
-        lastBookProgress = book?.let { BookProgress(it) }
+    /**
+     * 记录跳转前的阅读位置。返回 false 表示当前没有可记录的位置，
+     * 或 [forBookUrl] 与当前书籍不一致。
+     */
+    fun saveCurrentBookProgress(forBookUrl: String? = null): Boolean {
+        val currentBook = book ?: return false
+        if (forBookUrl != null && currentBook.bookUrl != forBookUrl) return false
+        val now = System.currentTimeMillis()
+        // 只有主线程能安全读取阅读界面的当前页；后台线程只记录模型里的位置
+        val snapshot = if (android.os.Looper.myLooper() == android.os.Looper.getMainLooper()) {
+            callBack?.currentReadPageSnapshot()
+        } else {
+            null
+        }
+        val record = if (snapshot != null && snapshot.chapterIndex >= 0) {
+            ReadJumpRecord(
+                bookUrl = currentBook.bookUrl,
+                chapterIndex = snapshot.chapterIndex,
+                chapterPos = snapshot.chapterPos,
+                chapterTitle = snapshot.chapterTitle.ifBlank {
+                    curTextChapter?.title ?: currentBook.durChapterTitle.orEmpty()
+                },
+                recordTime = now,
+                chapterCount = snapshot.chapterCount,
+                pageIndex = snapshot.pageIndex,
+                pageCount = snapshot.pageCount,
+                snippet = snapshot.snippet
+            )
+        } else {
+            if (chapterSize <= 0 || durChapterIndex !in 0 until chapterSize) return false
+            ReadJumpRecord(
+                bookUrl = currentBook.bookUrl,
+                chapterIndex = durChapterIndex,
+                chapterPos = durChapterPos,
+                chapterTitle = curTextChapter?.title ?: currentBook.durChapterTitle.orEmpty(),
+                recordTime = now,
+                chapterCount = chapterSize
+            )
+        }
+        addJumpRecord(record)
+        return true
     }
 
-    //恢复跳转前进度
-    fun restoreLastBookProgress() {
-        lastBookProgress?.let {
-            setProgress(it)
-            lastBookProgress = null
+    private fun addJumpRecord(record: ReadJumpRecord) {
+        val existing = jumpHistory.firstOrNull {
+            it.bookUrl == record.bookUrl &&
+                    it.chapterIndex == record.chapterIndex &&
+                    it.chapterPos == record.chapterPos
         }
+        if (existing != null) {
+            jumpHistory.remove(existing)
+            // 后台线程拿不到页码时，别把已记到的页码和首句覆盖掉
+            val merged = if (record.pageIndex < 0 && existing.pageIndex >= 0) {
+                existing.copy(
+                    recordTime = record.recordTime,
+                    chapterTitle = record.chapterTitle.ifBlank { existing.chapterTitle }
+                )
+            } else {
+                record
+            }
+            jumpHistory.add(0, merged)
+            return
+        }
+        jumpHistory.add(0, record)
+        while (jumpHistory.size > MAX_JUMP_HISTORY) {
+            jumpHistory.removeAt(jumpHistory.lastIndex)
+        }
+    }
+
+    fun hasJumpHistory(): Boolean {
+        val currentBook = book ?: return false
+        return jumpHistory.any { it.bookUrl == currentBook.bookUrl }
+    }
+
+    fun currentJumpHistory(): List<ReadJumpRecord> {
+        val currentBook = book ?: return emptyList()
+        return jumpHistory.filter { it.bookUrl == currentBook.bookUrl }
+    }
+
+    /** 退出书架时清空全部跳转记录 */
+    fun clearJumpHistory() {
+        jumpHistory.clear()
+    }
+
+    /** 恢复到选中的跳转记录 */
+    fun restoreJumpRecord(record: ReadJumpRecord) {
+        val currentBook = book ?: return
+        if (record.bookUrl != currentBook.bookUrl) return
+        setProgress(record.toBookProgress(currentBook))
+    }
+
+    /** 恢复最新一条跳转记录（退出全文搜索时用） */
+    fun restoreLatestJumpRecord(): Boolean {
+        val record = currentJumpHistory().firstOrNull() ?: return false
+        jumpHistory.remove(record)
+        restoreJumpRecord(record)
+        return true
     }
 
     fun clearTextChapter() {
@@ -418,7 +508,15 @@ object ReadBook : CoroutineScope by MainScope() {
         }
     }
 
-    fun skipToPage(index: Int, success: (() -> Unit)? = null) {
+    fun skipToPage(
+        index: Int,
+        recordOrigin: Boolean = true,
+        success: (() -> Unit)? = null
+    ) {
+        // 进度条跳页前记录当前页；跳转入口自己已经记过的传 recordOrigin = false
+        if (recordOrigin && index != durPageIndex) {
+            saveCurrentBookProgress()
+        }
         durChapterPos = curTextChapter?.getReadLength(index) ?: index
         callBack?.upContent {
             success?.invoke()
@@ -1033,6 +1131,9 @@ object ReadBook : CoroutineScope by MainScope() {
 
     interface CallBack : LayoutProgressListener {
         fun upMenuView()
+
+        /** 当前阅读页的章节、页码和第一句话，供跳转历史记录使用 */
+        fun currentReadPageSnapshot(): ReadPageSnapshot? = null
 
         fun loadChapterList(book: Book)
 

@@ -1358,4 +1358,6 @@
     <string name="content_select_process_text_title">System text actions (other apps)</string>
     <string name="read_aloud_from_here">Read from here</string>
     <string name="read_aloud_selected">Read selected</string>
+    <string name="read_jump_history_title">Restore reading position</string>
+    <string name="read_jump_history_hint">Tap a record to restore; tap Exit to leave the book</string>
 </resources>

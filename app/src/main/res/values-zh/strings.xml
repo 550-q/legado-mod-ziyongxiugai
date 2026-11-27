@@ -1251,4 +1251,6 @@
     <string name="content_select_process_text_title">系统文字处理动作（其他应用）</string>
     <string name="read_aloud_from_here">从此朗读</string>
     <string name="read_aloud_selected">朗读选中</string>
+    <string name="read_jump_history_title">恢复阅读位置</string>
+    <string name="read_jump_history_hint">点选记录恢复到对应位置；点「退出」返回书架</string>
 </resources>

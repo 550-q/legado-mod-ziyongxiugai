@@ -1238,4 +1238,6 @@
     <string name="content_select_process_text_title">系統文字處理動作（其他應用）</string>
     <string name="read_aloud_from_here">從此朗讀</string>
     <string name="read_aloud_selected">朗讀選取</string>
+    <string name="read_jump_history_title">恢復閱讀位置</string>
+    <string name="read_jump_history_hint">點選記錄恢復到對應位置；點「退出」返回書架</string>
 </resources>
