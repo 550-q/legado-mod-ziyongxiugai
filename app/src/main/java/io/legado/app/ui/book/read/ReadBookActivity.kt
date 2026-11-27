@@ -56,8 +56,11 @@ import io.legado.app.lib.dialogs.SelectItem
 import io.legado.app.lib.dialogs.alert
 import io.legado.app.lib.dialogs.selector
 import io.legado.app.lib.theme.accentColor
+import io.legado.app.lib.theme.primaryTextColor
+import io.legado.app.lib.theme.secondaryTextColor
 import io.legado.app.model.ReadAloud
 import io.legado.app.model.ReadBook
+import io.legado.app.model.ReadJumpRecord
 import io.legado.app.model.ReadPageSnapshot
 import io.legado.app.model.firstSentenceOfPageText
 import io.legado.app.model.analyzeRule.AnalyzeRule
@@ -108,6 +111,7 @@ import io.legado.app.ui.widget.PopupAction
 import io.legado.app.ui.widget.dialog.PhotoDialog
 import io.legado.app.utils.ACache
 import io.legado.app.utils.Debounce
+import io.legado.app.utils.dpToPx
 import io.legado.app.utils.LogUtils
 import io.legado.app.utils.NetworkUtils
 import io.legado.app.utils.StartActivityContract
@@ -170,6 +174,8 @@ class ReadBookActivity : BaseReadBookActivity(),
     private val tocActivity =
         registerForActivityResult(TocActivityResult()) {
             it?.let {
+                // 目录跳转前先记下当前页，返回书架时可从这里恢复
+                ReadBook.saveCurrentBookProgress()
                 viewModel.openChapter(it[0] as Int, it[1] as Int)
             }
         }
@@ -261,7 +267,6 @@ class ReadBookActivity : BaseReadBookActivity(),
     }
 
     //恢复跳转前进度对话框的交互结果
-    private var confirmRestoreProcess: Boolean? = null
     private val networkChangedListener by lazy {
         NetworkChangedListener(this)
     }
@@ -281,7 +286,10 @@ class ReadBookActivity : BaseReadBookActivity(),
         onBackPressedDispatcher.addCallback(this) {
             if (isShowingSearchResult) {
                 exitSearchMenu()
-                restoreLastBookProcess()
+                // 只是进入过搜索、没有跳转过的话，退出搜索就留在阅读页
+                if (ReadBook.hasJumpHistory()) {
+                    showJumpHistoryDialog()
+                }
                 return@addCallback
             }
             //有跳转记录时先列出可恢复的阅读位置，点「退出」才真的返回书架
@@ -1262,69 +1270,142 @@ class ReadBookActivity : BaseReadBookActivity(),
         }
     }
 
-    /* 恢复到 全文搜索/进度条跳转前的位置 */
-    private fun restoreLastBookProcess() {
-        if (confirmRestoreProcess == true) {
-            ReadBook.restoreLatestJumpRecord()
-        } else if (confirmRestoreProcess == null) {
-            alert(R.string.draw) {
-                setMessage(R.string.restore_last_book_process)
-                yesButton {
-                    confirmRestoreProcess = true
-                    ReadBook.restoreLatestJumpRecord() //恢复启动全文搜索前的进度
-                }
-                noButton {
-                    confirmRestoreProcess = false
-                }
-                onCancelled {
-                    confirmRestoreProcess = false
-                }
-            }
-        }
-    }
-
     /**
-     * 返回书架时列出跳转记录，点选恢复；点「退出」清记录并返回书架。
+     * 返回书架 / 退出全文搜索时列出跳转记录，点选恢复；点「退出」清记录并返回书架。
      */
     private fun showJumpHistoryDialog() {
+        if (isFinishing || isDestroyed) return
         val records = ReadBook.currentJumpHistory()
         if (records.isEmpty()) {
             finish()
             return
         }
-        val timeFormat = java.text.SimpleDateFormat("HH:mm", java.util.Locale.getDefault())
-        val recordItems = records.map { record ->
-            val countText = if (record.chapterCount > 0) {
-                "${record.chapterIndex + 1}/${record.chapterCount}"
-            } else {
-                "${record.chapterIndex + 1}"
-            }
-            buildString {
-                append(timeFormat.format(java.util.Date(record.recordTime)))
-                append("  ")
-                append(record.chapterTitle)
-                append("（").append(countText).append("）")
-                if (record.pageIndex >= 0 && record.pageCount > 0) {
-                    append(" 第").append(record.pageIndex + 1).append("/")
-                        .append(record.pageCount).append("页")
-                }
-                if (record.snippet.isNotBlank()) {
-                    append("\n").append(record.snippet)
-                }
-            }
+        autoPageStop()
+        textActionMenu.dismiss()
+        val dividerColor = (secondaryTextColor and 0x00FFFFFF) or 0x1F000000
+        val content = android.widget.LinearLayout(this).apply {
+            orientation = android.widget.LinearLayout.VERTICAL
+            setPadding(16.dpToPx(), 4.dpToPx(), 16.dpToPx(), 0)
         }
-        alert(R.string.read_jump_history_title) {
-            setMessage(getString(R.string.read_jump_history_hint))
-            items(recordItems) { dialog, index ->
-                dialog.dismiss()
-                ReadBook.restoreJumpRecord(records[index])
+        content.addView(android.widget.TextView(this).apply {
+            text = getString(R.string.read_jump_history_hint)
+            textSize = 12.5f
+            setTextColor(secondaryTextColor)
+            setPadding(0, 0, 0, 6.dpToPx())
+        })
+        val listLayout = android.widget.LinearLayout(this).apply {
+            orientation = android.widget.LinearLayout.VERTICAL
+        }
+        lateinit var dialog: androidx.appcompat.app.AlertDialog
+        records.forEachIndexed { index, record ->
+            if (index > 0) {
+                listLayout.addView(android.view.View(this).apply {
+                    setBackgroundColor(dividerColor)
+                    layoutParams = android.widget.LinearLayout.LayoutParams(
+                        android.view.ViewGroup.LayoutParams.MATCH_PARENT, 1
+                    )
+                })
             }
+            listLayout.addView(createJumpHistoryRow(record) {
+                dialog.dismiss()
+                exitSearchMenu()
+                ReadBook.restoreJumpRecord(record)
+            })
+        }
+        val rowHeight = 64.dpToPx()
+        val maxListHeight = (resources.displayMetrics.heightPixels * 0.46f).toInt()
+        content.addView(androidx.core.widget.NestedScrollView(this).apply {
+            overScrollMode = android.view.View.OVER_SCROLL_IF_CONTENT_SCROLLS
+            addView(
+                listLayout,
+                android.widget.LinearLayout.LayoutParams(
+                    android.view.ViewGroup.LayoutParams.MATCH_PARENT,
+                    android.view.ViewGroup.LayoutParams.WRAP_CONTENT
+                )
+            )
+            layoutParams = android.widget.LinearLayout.LayoutParams(
+                android.view.ViewGroup.LayoutParams.MATCH_PARENT,
+                minOf(records.size * rowHeight, maxListHeight).coerceAtLeast(rowHeight)
+            )
+        })
+        content.addView(android.view.View(this).apply {
+            setBackgroundColor(dividerColor)
+            layoutParams = android.widget.LinearLayout.LayoutParams(
+                android.view.ViewGroup.LayoutParams.MATCH_PARENT, 1
+            )
+        })
+        dialog = alert(R.string.read_jump_history_title) {
+            setCustomView(content)
             neutralButton(R.string.exit) {
                 ReadBook.clearJumpHistory()
                 finish()
             }
             negativeButton(R.string.cancel)
+        } as androidx.appcompat.app.AlertDialog
+    }
+
+    private fun createJumpHistoryRow(record: ReadJumpRecord, onClick: () -> Unit): android.view.View {
+        val row = android.widget.LinearLayout(this).apply {
+            orientation = android.widget.LinearLayout.HORIZONTAL
+            gravity = android.view.Gravity.CENTER_VERTICAL
+            setPadding(0, 9.dpToPx(), 0, 9.dpToPx())
+            minimumHeight = 60.dpToPx()
+            isClickable = true
+            isFocusable = true
+            val outValue = android.util.TypedValue()
+            if (theme.resolveAttribute(android.R.attr.selectableItemBackground, outValue, true)) {
+                setBackgroundResource(outValue.resourceId)
+            }
+            setOnClickListener { onClick() }
         }
+        val timeText = java.text.SimpleDateFormat("HH:mm:ss", java.util.Locale.getDefault())
+            .format(java.util.Date(record.recordTime))
+        row.addView(android.widget.TextView(this).apply {
+            text = timeText
+            textSize = 12f
+            setTextColor(secondaryTextColor)
+        })
+        // 与顶部「进度 xx/yyy」一致，显示整本书的章节进度
+        val pageText = if (record.chapterCount > 0) {
+            "${record.chapterIndex + 1}/${record.chapterCount}"
+        } else if (record.pageIndex >= 0 && record.pageCount > 0) {
+            "${record.pageIndex + 1}/${record.pageCount}"
+        } else {
+            "--/--"
+        }
+        row.addView(android.widget.TextView(this).apply {
+            text = pageText
+            textSize = 12f
+            setTextColor(accentColor)
+            setPadding(10.dpToPx(), 0, 10.dpToPx(), 0)
+        })
+        val infoLayout = android.widget.LinearLayout(this).apply {
+            orientation = android.widget.LinearLayout.VERTICAL
+        }
+        infoLayout.addView(android.widget.TextView(this).apply {
+            text = record.snippet.ifBlank { record.chapterTitle }
+            textSize = 14f
+            maxLines = 1
+            ellipsize = android.text.TextUtils.TruncateAt.END
+            setTextColor(primaryTextColor)
+        })
+        if (record.chapterTitle.isNotBlank() && record.snippet.isNotBlank()) {
+            infoLayout.addView(android.widget.TextView(this).apply {
+                text = record.chapterTitle
+                textSize = 11f
+                maxLines = 1
+                ellipsize = android.text.TextUtils.TruncateAt.END
+                setTextColor(secondaryTextColor)
+                setPadding(0, 2.dpToPx(), 0, 0)
+            })
+        }
+        row.addView(
+            infoLayout,
+            android.widget.LinearLayout.LayoutParams(
+                0, android.view.ViewGroup.LayoutParams.WRAP_CONTENT, 1f
+            )
+        )
+        return row
     }
 
     override fun currentReadPageSnapshot(): ReadPageSnapshot? {
@@ -1654,6 +1735,7 @@ class ReadBookActivity : BaseReadBookActivity(),
     /* 全文搜索跳转 */
     override fun navigateToSearch(searchResult: SearchResult, index: Int) {
         viewModel.searchResultIndex = index
+        ReadBook.saveCurrentBookProgress()
         skipToSearch(searchResult)
     }
 
