@@ -69,9 +69,10 @@ class ReadView(context: Context, attrs: AttributeSet) :
     private var pressDown = false
     private var isMove = false
 
-    /** 文字选择时的放大镜（Android 9+）：上方一版、下方一版 */
-    private var magnifierAbove: android.widget.Magnifier? = null
-    private var magnifierBelow: android.widget.Magnifier? = null
+    /** 文字选择时的放大镜（Android 9+） */
+    private var selectionMagnifier: android.widget.Magnifier? = null
+    // 当前放大镜的纵向偏移：0 = 在手柄上方，其他值 = 翻到手柄下方
+    private var selectionMagnifierOffset = Int.MIN_VALUE
 
     //起始点
     var startX: Float = 0f
@@ -406,15 +407,16 @@ class ReadView(context: Context, attrs: AttributeSet) :
         val magnifierWidth = (200 * density).toInt()
         val magnifierHeight = (72 * density).toInt()
         val gap = (16 * density).toInt()
-        val nearTop = y < magnifierHeight + gap * 2
-        val magnifier = if (nearTop) {
-            magnifierBelow ?: createSelectionMagnifier(magnifierWidth, magnifierHeight, magnifierHeight + gap)
-                .also { magnifierBelow = it }
-        } else {
-            magnifierAbove ?: createSelectionMagnifier(magnifierWidth, magnifierHeight, 0)
-                .also { magnifierAbove = it }
+        val offset = if (y < magnifierHeight + gap * 2) magnifierHeight + gap else 0
+        if (offset != selectionMagnifierOffset) {
+            // 上下切换时把旧的那个关掉再新建，否则旧位置会留一块残影
+            runCatching { selectionMagnifier?.dismiss() }
+            selectionMagnifier = createSelectionMagnifier(
+                magnifierWidth, magnifierHeight, offset
+            )
+            selectionMagnifierOffset = offset
         }
-        runCatching { magnifier?.show(x, y) }
+        runCatching { selectionMagnifier?.show(x, y) }
     }
 
     /**
@@ -475,8 +477,7 @@ class ReadView(context: Context, attrs: AttributeSet) :
 
     private fun dismissSelectionMagnifier() {
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.P) {
-            runCatching { magnifierAbove?.dismiss() }
-            runCatching { magnifierBelow?.dismiss() }
+            runCatching { selectionMagnifier?.dismiss() }
         }
     }
 
