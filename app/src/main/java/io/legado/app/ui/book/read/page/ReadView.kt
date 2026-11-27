@@ -69,8 +69,9 @@ class ReadView(context: Context, attrs: AttributeSet) :
     private var pressDown = false
     private var isMove = false
 
-    /** 文字选择时的放大镜（Android 9+） */
-    private var selectionMagnifier: android.widget.Magnifier? = null
+    /** 文字选择时的放大镜（Android 9+）：上方一版、下方一版 */
+    private var magnifierAbove: android.widget.Magnifier? = null
+    private var magnifierBelow: android.widget.Magnifier? = null
 
     //起始点
     var startX: Float = 0f
@@ -401,25 +402,65 @@ class ReadView(context: Context, attrs: AttributeSet) :
      */
     private fun showSelectionMagnifier(x: Float, y: Float) {
         if (Build.VERSION.SDK_INT < Build.VERSION_CODES.P) return
-        runCatching {
-            val density = resources.displayMetrics.density
-            val magnifierWidth = (200 * density).toInt()
-            val magnifierHeight = (72 * density).toInt()
-            val gap = (16 * density).toInt()
-            val magnifier = selectionMagnifier ?: android.widget.Magnifier.Builder(this)
-                .setSize(magnifierWidth, magnifierHeight)
-                .setZoom(2f)
-                .build()
-                .also { selectionMagnifier = it }
-            // 上方留不出放大镜的高度时，改成显示在手柄下方
-            if (y < magnifierHeight + gap * 2) {
-                magnifier.setOffset(0f, (magnifierHeight + gap).toFloat())
-            } else {
-                magnifier.setOffset(0f, 0f)
-            }
-            magnifier.show(x, y)
+        val density = resources.displayMetrics.density
+        val magnifierWidth = (200 * density).toInt()
+        val magnifierHeight = (72 * density).toInt()
+        val gap = (16 * density).toInt()
+        val nearTop = y < magnifierHeight + gap * 2
+        val magnifier = if (nearTop) {
+            magnifierBelow ?: createSelectionMagnifier(magnifierWidth, magnifierHeight, magnifierHeight + gap)
+                .also { magnifierBelow = it }
+        } else {
+            magnifierAbove ?: createSelectionMagnifier(magnifierWidth, magnifierHeight, 0)
+                .also { magnifierAbove = it }
         }
+        runCatching { magnifier?.show(x, y) }
     }
+
+    /**
+     * 不同 Android 版本 Magnifier.Builder 的方法名不一样
+     * （旧的 setZoom/setOffset，新的 setInitialZoom/setDefaultSourceToMagnifierOffset），
+     * 这里用反射两种都试一遍，避免在旧手机上直接崩。
+     */
+    private fun createSelectionMagnifier(
+        width: Int,
+        height: Int,
+        offsetY: Int
+    ): android.widget.Magnifier? = runCatching {
+        val builder = android.widget.Magnifier.Builder(this)
+        builder.setSize(width, height)
+        val zoomOk = runCatching {
+            builder.javaClass
+                .getMethod("setInitialZoom", java.lang.Float.TYPE)
+                .invoke(builder, 2f)
+        }.isSuccess
+        if (offsetY != 0) {
+            val offsetOk = runCatching {
+                builder.javaClass
+                    .getMethod(
+                        "setDefaultSourceToMagnifierOffset",
+                        Integer.TYPE, Integer.TYPE
+                    )
+                    .invoke(builder, 0, offsetY)
+            }.isSuccess
+            if (!offsetOk) {
+                runCatching {
+                    builder.javaClass
+                        .getMethod("setOffset", java.lang.Float.TYPE, java.lang.Float.TYPE)
+                        .invoke(builder, 0f, offsetY.toFloat())
+                }
+            }
+        }
+        val magnifier = builder.build()
+        if (!zoomOk) {
+            runCatching {
+                magnifier.javaClass
+                    .getMethod("setZoom", java.lang.Float.TYPE)
+                    .invoke(magnifier, 2f)
+            }
+        }
+        magnifier
+    }.getOrNull()
 
     /**
      * 拖动选区手柄时由外部调用：rawX/rawY 是屏幕坐标，这里换算成视图坐标。
@@ -434,7 +475,8 @@ class ReadView(context: Context, attrs: AttributeSet) :
 
     private fun dismissSelectionMagnifier() {
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.P) {
-            selectionMagnifier?.dismiss()
+            runCatching { magnifierAbove?.dismiss() }
+            runCatching { magnifierBelow?.dismiss() }
         }
     }
 
