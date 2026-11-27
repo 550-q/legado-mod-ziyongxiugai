@@ -81,9 +81,26 @@ abstract class BaseReadAloudService : BaseService(),
         var pause = true
             private set
 
+        /**
+         * 定时剩余秒数，0 表示未开启定时
+         */
         @JvmStatic
-        var timeMinute: Int = 0
+        var timerRemainSeconds: Int = 0
             private set
+
+        /**
+         * 当前定时的计时单位，true 为秒、false 为分钟
+         */
+        @JvmStatic
+        var timerBySecond: Boolean = false
+            private set
+
+        /**
+         * 定时剩余分钟数（向上取整），兼容只认分钟的旧界面
+         */
+        @JvmStatic
+        val timeMinute: Int
+            get() = if (timerRemainSeconds <= 0) 0 else (timerRemainSeconds + 59) / 60
 
         fun isPlay(): Boolean {
             return isRun && !pause
@@ -152,10 +169,7 @@ abstract class BaseReadAloudService : BaseService(),
         initBroadcastReceiver()
         initPhoneStateListener()
         upMediaSessionPlaybackState(PlaybackStateCompat.STATE_PLAYING)
-        setTimer(AppConfig.ttsTimer)
-        if (AppConfig.ttsTimer > 0) {
-            toastOnUi("朗读定时 ${AppConfig.ttsTimer} 分钟")
-        }
+        restoreSavedTimer()
         execute {
             ImageLoader
                 .loadBitmap(this@BaseReadAloudService, ReadBook.book?.getDisplayCover())
@@ -223,7 +237,14 @@ abstract class BaseReadAloudService : BaseService(),
             IntentAction.prev -> prevChapter()
             IntentAction.next -> nextChapter()
             IntentAction.addTimer -> addTimer()
-            IntentAction.setTimer -> setTimer(intent.getIntExtra("minute", 0))
+            IntentAction.setTimer -> {
+                val seconds = intent.getIntExtra("seconds", -1)
+                if (seconds >= 0) {
+                    setTimerSeconds(seconds, intent.getBooleanExtra("bySecond", false))
+                } else {
+                    setTimer(intent.getIntExtra("minute", 0))
+                }
+            }
             IntentAction.stop -> stopSelf()
         }
         return super.onStartCommand(intent, flags, startId)
@@ -381,18 +402,79 @@ abstract class BaseReadAloudService : BaseService(),
     }
 
     private fun setTimer(minute: Int) {
-        timeMinute = minute
-        doDs()
+        applyTimer(minute * 60, bySecond = false)
+    }
+
+    private fun setTimerSeconds(seconds: Int, bySecond: Boolean) {
+        applyTimer(seconds, bySecond)
     }
 
     private fun addTimer() {
-        if (timeMinute == 180) {
-            timeMinute = 0
+        val minute = timeMinute
+        if (minute >= 180) {
+            applyTimer(0, bySecond = false)
         } else {
-            timeMinute += 10
-            if (timeMinute > 180) timeMinute = 180
+            applyTimer((minute + 10).coerceAtMost(180) * 60, bySecond = false)
+        }
+    }
+
+    /**
+     * 应用定时设置并写入配置，下次开始朗读时仍然生效
+     */
+    private fun applyTimer(seconds: Int, bySecond: Boolean) {
+        timerRemainSeconds = seconds.coerceAtLeast(0)
+        if (timerRemainSeconds > 0) {
+            timerBySecond = bySecond
+            AppConfig.ttsTimerSeconds = timerRemainSeconds
+            AppConfig.ttsTimerBySecond = bySecond
+            AppConfig.ttsTimer = (timerRemainSeconds + 59) / 60
+        } else {
+            AppConfig.ttsTimerSeconds = 0
+            AppConfig.ttsTimer = 0
         }
         doDs()
+    }
+
+    /**
+     * 开始朗读时恢复上次保存的定时
+     */
+    private fun restoreSavedTimer() {
+        val savedSeconds = AppConfig.ttsTimerSeconds.takeIf { it > 0 }
+            ?: (AppConfig.ttsTimer * 60).takeIf { it > 0 }
+            ?: return
+        val bySecond = AppConfig.ttsTimerBySecond && AppConfig.ttsTimerSeconds > 0
+        applyTimer(savedSeconds, bySecond)
+        toastOnUi("朗读定时 " + formatTimerText(savedSeconds, bySecond))
+    }
+
+    private fun formatTimerText(seconds: Int, bySecond: Boolean): String {
+        return if (bySecond || seconds < 60) {
+            getString(R.string.timer_s, seconds)
+        } else {
+            getString(R.string.timer_m, (seconds + 59) / 60)
+        }
+    }
+
+    private fun timerTitleText(): String? {
+        return when {
+            timerRemainSeconds <= 0 -> null
+            timerBySecond -> getString(R.string.read_aloud_timer_s, timerRemainSeconds)
+            else -> getString(R.string.read_aloud_timer, timeMinute)
+        }
+    }
+
+    /**
+     * 定时到点：按设置暂停朗读，否则停止朗读
+     */
+    private fun finishTimer() {
+        timerRemainSeconds = 0
+        postEvent(EventBus.READ_ALOUD_DS, 0)
+        if (AppConfig.pauseReadAloudAfterTimer) {
+            pauseReadAloud()
+            toastOnUi("定时结束，朗读已暂停")
+        } else {
+            ReadAloud.stop(this@BaseReadAloudService)
+        }
     }
 
     /**
@@ -403,21 +485,30 @@ abstract class BaseReadAloudService : BaseService(),
         postEvent(EventBus.READ_ALOUD_DS, timeMinute)
         upReadAloudNotification()
         dsJob?.cancel()
+        if (timerRemainSeconds <= 0) {
+            return
+        }
         dsJob = lifecycleScope.launch {
+            var lastDisplay = -1
             while (isActive) {
-                delay(60000)
-                if (!pause) {
-                    if (timeMinute >= 0) {
-                        timeMinute--
-                    }
-                    if (timeMinute == 0) {
-                        ReadAloud.stop(this@BaseReadAloudService)
-                        postEvent(EventBus.READ_ALOUD_DS, timeMinute)
-                        break
-                    }
+                // 暂停期间不倒计时，顺便降低空转频率
+                delay(if (pause) 10_000L else 1_000L)
+                if (pause) {
+                    continue
                 }
-                postEvent(EventBus.READ_ALOUD_DS, timeMinute)
-                upReadAloudNotification()
+                if (timerRemainSeconds > 0) {
+                    timerRemainSeconds--
+                }
+                if (timerRemainSeconds == 0) {
+                    finishTimer()
+                    break
+                }
+                val displayValue = if (timerBySecond) timerRemainSeconds else timeMinute
+                if (displayValue != lastDisplay) {
+                    lastDisplay = displayValue
+                    postEvent(EventBus.READ_ALOUD_DS, timeMinute)
+                    upReadAloudNotification()
+                }
             }
         }
     }
@@ -520,10 +611,7 @@ abstract class BaseReadAloudService : BaseService(),
     private fun upMediaMetadata() {
         var nTitle: String = when {
             pause -> getString(R.string.read_aloud_pause)
-            timeMinute > 0 -> getString(
-                R.string.read_aloud_timer,
-                timeMinute
-            )
+            timerTitleText() != null -> timerTitleText()!!
 
             else -> getString(R.string.read_aloud_t)
         }
@@ -599,10 +687,7 @@ abstract class BaseReadAloudService : BaseService(),
     private fun createNotification(): NotificationCompat.Builder {
         var nTitle: String = when {
             pause -> getString(R.string.read_aloud_pause)
-            timeMinute > 0 -> getString(
-                R.string.read_aloud_timer,
-                timeMinute
-            )
+            timerTitleText() != null -> timerTitleText()!!
 
             else -> getString(R.string.read_aloud_t)
         }

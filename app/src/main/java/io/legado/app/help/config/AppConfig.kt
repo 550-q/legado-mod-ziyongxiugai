@@ -352,6 +352,51 @@ object AppConfig : SharedPreferences.OnSharedPreferenceChangeListener {
             appCtx.putPrefInt(PreferKey.ttsTimer, value)
         }
 
+    /**
+     * 朗读定时剩余总秒数，0 表示未开启定时
+     */
+    var ttsTimerSeconds: Int
+        get() = appCtx.getPrefInt(PreferKey.ttsTimerSeconds, 0)
+        set(value) {
+            appCtx.putPrefInt(PreferKey.ttsTimerSeconds, value)
+        }
+
+    /**
+     * 当前定时使用的计时单位，true 为秒、false 为分钟
+     */
+    var ttsTimerBySecond: Boolean
+        get() = appCtx.getPrefBoolean(PreferKey.ttsTimerBySecond, false)
+        set(value) {
+            appCtx.putPrefBoolean(PreferKey.ttsTimerBySecond, value)
+        }
+
+    /**
+     * 自定义定时上次输入的数值
+     */
+    var ttsTimerCustomValue: Int
+        get() = appCtx.getPrefInt(PreferKey.ttsTimerCustomValue, 30)
+        set(value) {
+            appCtx.putPrefInt(PreferKey.ttsTimerCustomValue, value)
+        }
+
+    /**
+     * 自定义定时上次选择的单位，true 为秒、false 为分钟
+     */
+    var ttsTimerCustomBySecond: Boolean
+        get() = appCtx.getPrefBoolean(PreferKey.ttsTimerCustomBySecond, false)
+        set(value) {
+            appCtx.putPrefBoolean(PreferKey.ttsTimerCustomBySecond, value)
+        }
+
+    /**
+     * 朗读定时结束后暂停朗读（关闭时为停止朗读）
+     */
+    var pauseReadAloudAfterTimer: Boolean
+        get() = appCtx.getPrefBoolean(PreferKey.pauseReadAloudAfterTimer, false)
+        set(value) {
+            appCtx.putPrefBoolean(PreferKey.pauseReadAloudAfterTimer, value)
+        }
+
     val speechRatePlay: Int get() = if (ttsFlowSys) defaultSpeechRate else ttsSpeechRate
 
     var chineseConverterType: Int

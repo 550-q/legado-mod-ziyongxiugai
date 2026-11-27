@@ -1223,4 +1223,12 @@
     <string name="auto_check_new_backup_s">打开软件时检查是否有新备份，有新备份时提示是否更新</string>
     <string name="sys_image_picker">系统图片选择器</string>
     <string name="group_select_multi_hint">可多選，不選則放入當前所在分組。</string>
+    <string name="timer_s">%d 秒</string>
+    <string name="read_aloud_timer_s">正在朗讀（還剩 %d 秒）</string>
+    <string name="timer_custom">自訂</string>
+    <string name="timer_custom_title">自訂定時</string>
+    <string name="timer_custom_by_second">按秒計時</string>
+    <string name="timer_custom_invalid">請輸入 1~9999 之間的數字</string>
+    <string name="pause_read_aloud_after_timer_title">定時結束後暫停朗讀</string>
+    <string name="pause_read_aloud_after_timer_summary">定時到點後暫停朗讀，關閉則停止朗讀</string>
 </resources>

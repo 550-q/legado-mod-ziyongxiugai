@@ -1344,4 +1344,12 @@
     <string name="auto_update_summary">每天自动检查软件是否更新</string>
     <string name="shibboleth">口令</string>
     <string name="group_select_multi_hint">Multiple groups can be selected. Leave all unchecked to use the current group.</string>
+    <string name="timer_s">%d s</string>
+    <string name="read_aloud_timer_s">Speaking(%d s left)</string>
+    <string name="timer_custom">Custom</string>
+    <string name="timer_custom_title">Custom timer</string>
+    <string name="timer_custom_by_second">Count in seconds</string>
+    <string name="timer_custom_invalid">Enter a number between 1 and 9999</string>
+    <string name="pause_read_aloud_after_timer_title">Pause when timer ends</string>
+    <string name="pause_read_aloud_after_timer_summary">Pause read-aloud instead of stopping when the timer runs out</string>
 </resources>

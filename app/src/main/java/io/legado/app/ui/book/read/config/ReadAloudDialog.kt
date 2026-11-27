@@ -3,6 +3,9 @@ package io.legado.app.ui.book.read.config
 import android.annotation.SuppressLint
 import android.content.DialogInterface
 import android.os.Bundle
+import android.text.InputType
+import android.widget.EditText
+import android.widget.LinearLayout
 import android.view.Gravity
 import android.view.View
 import android.view.ViewGroup
@@ -13,7 +16,9 @@ import io.legado.app.base.BaseDialogFragment
 import io.legado.app.constant.EventBus
 import io.legado.app.databinding.DialogReadAloudBinding
 import io.legado.app.help.config.AppConfig
+import io.legado.app.lib.dialogs.alert
 import io.legado.app.lib.dialogs.selector
+import androidx.appcompat.widget.SwitchCompat
 import io.legado.app.lib.theme.bottomBackground
 import io.legado.app.lib.theme.getPrimaryTextColor
 import io.legado.app.model.ReadAloud
@@ -133,9 +138,13 @@ class ReadAloudDialog : BaseDialogFragment(R.layout.dialog_read_aloud) {
         }
         tvTimer.setOnClickListener {
             val times = intArrayOf(0, 5, 10, 15, 30, 60, 90, 180)
-            val timeKeys = times.map { "$it 分钟" }
+            val timeKeys = times.map { "$it 分钟" } + getString(R.string.timer_custom)
             context?.selector("设定时间", timeKeys) { _, index ->
-                ReadAloud.setTimer(requireContext(), times[index])
+                if (index < times.size) {
+                    ReadAloud.setTimer(requireContext(), times[index])
+                } else {
+                    showCustomTimerDialog()
+                }
             }
         }
         //设置保存的默认值
@@ -198,10 +207,55 @@ class ReadAloudDialog : BaseDialogFragment(R.layout.dialog_read_aloud) {
     }
 
     private fun upTimerText(timeMinute: Int) {
-        if (timeMinute < 0) {
-            binding.tvTimer.text = requireContext().getString(R.string.timer_m, 0)
+        val remainSeconds = BaseReadAloudService.timerRemainSeconds
+        if (remainSeconds > 0 && BaseReadAloudService.timerBySecond) {
+            binding.tvTimer.text = requireContext().getString(R.string.timer_s, remainSeconds)
         } else {
-            binding.tvTimer.text = requireContext().getString(R.string.timer_m, timeMinute)
+            binding.tvTimer.text = requireContext().getString(R.string.timer_m, timeMinute.coerceAtLeast(0))
+        }
+    }
+
+    /**
+     * 自定义定时：输入 1~9999，可切分/秒，记住上次输入
+     */
+    private fun showCustomTimerDialog() {
+        val ctx = context ?: return
+        val padding = (16 * resources.displayMetrics.density).toInt()
+        val container = LinearLayout(ctx).apply {
+            orientation = LinearLayout.VERTICAL
+            setPadding(padding, padding / 2, padding, 0)
+        }
+        val editText = EditText(ctx).apply {
+            inputType = InputType.TYPE_CLASS_NUMBER
+            hint = "1 ~ 9999"
+            setSingleLine(true)
+            setText(AppConfig.ttsTimerCustomValue.toString())
+        }
+        val bySecondSwitch = SwitchCompat(ctx).apply {
+            text = getString(R.string.timer_custom_by_second)
+            isChecked = AppConfig.ttsTimerCustomBySecond
+        }
+        container.addView(editText)
+        container.addView(bySecondSwitch)
+        ctx.alert(R.string.timer_custom_title) {
+            customView { container }
+            okButton {
+                val value = editText.text?.toString()?.toIntOrNull()
+                if (value == null || value !in 1..9999) {
+                    toastOnUi(getString(R.string.timer_custom_invalid))
+                    return@okButton
+                }
+                val bySecond = bySecondSwitch.isChecked
+                AppConfig.ttsTimerCustomValue = value
+                AppConfig.ttsTimerCustomBySecond = bySecond
+                val seconds = if (bySecond) value else value * 60
+                AppConfig.ttsTimerSeconds = seconds
+                AppConfig.ttsTimerBySecond = bySecond
+                AppConfig.ttsTimer = (seconds + 59) / 60
+                ReadAloud.setTimerSeconds(ctx, seconds, bySecond)
+                upTimerText(BaseReadAloudService.timeMinute)
+            }
+            cancelButton()
         }
     }
 
@@ -220,7 +274,10 @@ class ReadAloudDialog : BaseDialogFragment(R.layout.dialog_read_aloud) {
 
     override fun observeLiveBus() {
         observeEvent<Int>(EventBus.ALOUD_STATE) { upPlayState() }
-        observeEvent<Int>(EventBus.READ_ALOUD_DS) { binding.seekTimer.progress = it }
+        observeEvent<Int>(EventBus.READ_ALOUD_DS) {
+            binding.seekTimer.progress = it
+            upTimerText(BaseReadAloudService.timeMinute)
+        }
     }
 
     interface CallBack {
