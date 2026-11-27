@@ -1125,6 +1125,7 @@ class ReadBookActivity : BaseReadBookActivity(),
                     appDb.bookDao.insert(book)
                 }
                 startActivityForBook(book)
+                skipJumpHistoryPrompt = true
                 finish()
             }
         }
@@ -1308,6 +1309,8 @@ class ReadBookActivity : BaseReadBookActivity(),
             }
             listLayout.addView(createJumpHistoryRow(record) {
                 dialog.dismiss()
+                // 从列表里跳到别的位置，也要把点之前的这一页记下来，方便再回来
+                ReadBook.saveCurrentBookProgress()
                 exitSearchMenu()
                 ReadBook.restoreJumpRecord(record)
             })
@@ -1837,7 +1840,17 @@ class ReadBookActivity : BaseReadBookActivity(),
         }
     }
 
+    // 更换书籍等内部流程直接 finish，不弹跳转记录
+    private var skipJumpHistoryPrompt = false
+
     override fun finish() {
+        if (!skipJumpHistoryPrompt && !isFinishing && !isDestroyed && ReadBook.hasJumpHistory()) {
+            // 左上角返回、系统返回都先给机会选恢复位置，点「退出」才真的回书架
+            showJumpHistoryDialog()
+            return
+        }
+        // 退回书架就销毁本次阅读的跳转记录
+        ReadBook.clearJumpHistory()
         val book = ReadBook.book ?: return super.finish()
         if (ReadBook.inBookshelf) {
             callBackBookEnd()
