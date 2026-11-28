@@ -40,12 +40,6 @@ import kotlin.math.min
  * 阅读内容视图
  */
 class ContentTextView(context: Context, attrs: AttributeSet?) : View(context, attrs) {
-
-    companion object {
-        /** 阅读界面暂停期间暂停重新分页，避免状态栏显隐导致正文跳页 */
-        @JvmStatic
-        var suspendFormat = false
-    }
     var selectAble = AppConfig.textSelectAble
     val selectedPaint by lazy {
         Paint().apply {
@@ -791,6 +785,10 @@ class ContentTextView(context: Context, attrs: AttributeSet?) : View(context, at
             }
         }
         private val cursorWidth = 24.dpToPx()
+
+        /** 阅读界面暂停期间暂停重新分页，避免状态栏显隐导致正文跳页 */
+        @JvmStatic
+        var suspendFormat = false
     }
 
     interface CallBack {
