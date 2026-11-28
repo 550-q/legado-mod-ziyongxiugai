@@ -229,65 +229,163 @@ class SelectionWebSearchDialog() : BottomSheetDialogFragment(R.layout.dialog_sel
         }
     }
 
-    /** 引擎管理：点击编辑名称/地址，底部可恢复默认或新增 */
+    /** 引擎管理：卡片列表，每项可编辑名称/地址/CSS，可删除（带确认） */
     private fun showEngineManageDialog() {
         val context = requireContext()
-        val engines = SelectionSearchEngineConfig.engines(context).toMutableList()
+        val scrollView = android.widget.ScrollView(context).apply {
+            setPadding(0, 8.dpToPx(), 0, 0)
+        }
         val listLayout = LinearLayout(context).apply {
             orientation = LinearLayout.VERTICAL
-            setPadding(24.dpToPx(), 8.dpToPx(), 24.dpToPx(), 8.dpToPx())
+            setPadding(16.dpToPx(), 8.dpToPx(), 16.dpToPx(), 8.dpToPx())
         }
-        fun render() {
-            listLayout.removeAllViews()
-            engines.forEach { engine ->
-                val row = TextView(context).apply {
-                    text = "${engine.name}\n${engine.url}"
-                    textSize = 14f
-                    setTextColor(context.primaryTextColor)
-                    setPadding(0, 16.dpToPx(), 0, 16.dpToPx())
-                    setOnClickListener { showEditEngineDialog(engine) { updated -> replaceEngine(updated) } }
-                }
-                listLayout.addView(row)
-            }
-        }
-        render()
+        scrollView.addView(listLayout)
+        engineDialogList = listLayout
+        renderEngineCards()
+
         AlertDialog.Builder(context)
             .setTitle(R.string.selection_search_engine_title)
-            .setView(listLayout)
+            .setView(scrollView)
             .setNeutralButton(R.string.reset) { _, _ ->
                 SelectionSearchEngineConfig.resetToDefault(context)
-                // 当前引擎可能被删掉，重新按默认引擎加载
-                loadSearch(
-                    binding.editQuery.text?.toString().orEmpty(),
-                    SelectionSearchEngineConfig.currentEngine(context).id
-                )
+                val engine = SelectionSearchEngineConfig.currentEngine(context)
+                loadSearch(binding.editQuery.text?.toString().orEmpty(), engine.id)
             }
             .setNegativeButton(R.string.add) { _, _ ->
-                showEditEngineDialog(null) { updated -> engines.add(updated); replaceEngines(engines) }
+                showEditEngineDialog(null)
             }
             .setPositiveButton(R.string.cancel, null)
+            .create()
+            .also { dialog ->
+                dialog.setOnShowListener {
+                    scrollView.layoutParams = scrollView.layoutParams.apply {
+                        height = (resources.displayMetrics.heightPixels * 0.55f).toInt()
+                    }
+                }
+                dialog.show()
+            }
+    }
+
+    private var engineDialogList: LinearLayout? = null
+
+    private fun renderEngineCards() {
+        val context = requireContext()
+        val listLayout = engineDialogList ?: return
+        listLayout.removeAllViews()
+        SelectionSearchEngineConfig.engines(context).forEach { engine ->
+            listLayout.addView(createEngineCard(engine))
+        }
+    }
+
+    /** 引擎列表改动后：刷新列表、必要时切换当前引擎并重新搜索 */
+    private fun onEnginesChanged() {
+        val context = requireContext()
+        val engines = SelectionSearchEngineConfig.engines(context)
+        if (engines.isEmpty()) {
+            SelectionSearchEngineConfig.resetToDefault(context)
+        }
+        val current = currentEngine
+        val newCurrent = SelectionSearchEngineConfig.currentEngine(context)
+        if (current == null || engines.none { it.id == current.id }) {
+            loadSearch(binding.editQuery.text?.toString().orEmpty(), newCurrent.id)
+        }
+        renderEngineCards()
+    }
+
+    /** 单个引擎卡片：名称 / 地址 / CSS 屏蔽状态 / 编辑·删除 */
+    private fun createEngineCard(
+        engine: SelectionSearchEngineConfig.SearchEngine
+    ): View {
+        val context = requireContext()
+        val card = LinearLayout(context).apply {
+            orientation = LinearLayout.VERTICAL
+            setPadding(14.dpToPx(), 12.dpToPx(), 14.dpToPx(), 10.dpToPx())
+            background = GradientDrawable().apply {
+                cornerRadius = 12f.dpToPx()
+                setColor(context.secondaryTextColor and 0x14FFFFFF.toInt())
+            }
+            layoutParams = LinearLayout.LayoutParams(
+                ViewGroup.LayoutParams.MATCH_PARENT,
+                ViewGroup.LayoutParams.WRAP_CONTENT
+            ).apply {
+                bottomMargin = 10.dpToPx()
+            }
+        }
+        val nameView = TextView(context).apply {
+            text = engine.name
+            textSize = 16f
+            maxLines = 1
+            setTextColor(context.primaryTextColor)
+        }
+        val urlView = TextView(context).apply {
+            text = engine.url
+            textSize = 12f
+            setPadding(0, 5.dpToPx(), 0, 6.dpToPx())
+            setTextColor(context.secondaryTextColor)
+        }
+        val cssView = TextView(context).apply {
+            text = context.getString(R.string.selection_search_engine_hide_css_enabled)
+            textSize = 12f
+            setTextColor(context.accentColor)
+            visibility = if (engine.hideCss.isNullOrBlank()) View.GONE else View.VISIBLE
+        }
+        val editButton = cardButton(context, context.getString(R.string.edit))
+        val deleteButton = cardButton(context, context.getString(R.string.delete))
+        editButton.setOnClickListener { showEditEngineDialog(engine) }
+        deleteButton.setOnClickListener { confirmDeleteEngine(engine) }
+        val buttonRow = LinearLayout(context).apply {
+            orientation = LinearLayout.HORIZONTAL
+            gravity = Gravity.END or Gravity.CENTER_VERTICAL
+            setPadding(0, 6.dpToPx(), 0, 0)
+            addView(editButton)
+            addView(deleteButton)
+        }
+        card.addView(nameView)
+        card.addView(urlView)
+        card.addView(cssView)
+        card.addView(buttonRow)
+        return card
+    }
+
+    private fun cardButton(context: Context, text: String): TextView {
+        return TextView(context).apply {
+            this.text = text
+            textSize = 13f
+            gravity = Gravity.CENTER
+            setTextColor(context.accentColor)
+            setPadding(12.dpToPx(), 7.dpToPx(), 12.dpToPx(), 7.dpToPx())
+            layoutParams = LinearLayout.LayoutParams(
+                ViewGroup.LayoutParams.WRAP_CONTENT,
+                ViewGroup.LayoutParams.WRAP_CONTENT
+            ).apply {
+                marginStart = 8.dpToPx()
+            }
+        }
+    }
+
+    private fun confirmDeleteEngine(engine: SelectionSearchEngineConfig.SearchEngine) {
+        val context = requireContext()
+        AlertDialog.Builder(context)
+            .setTitle(R.string.delete)
+            .setMessage(engine.name)
+            .setNegativeButton(R.string.cancel, null)
+            .setPositiveButton(R.string.ok) { _, _ ->
+                val engines = SelectionSearchEngineConfig.engines(context)
+                    .filterNot { it.id == engine.id }
+                if (engines.isEmpty()) {
+                    SelectionSearchEngineConfig.resetToDefault(context)
+                } else {
+                    SelectionSearchEngineConfig.saveEngines(context, engines)
+                    if (currentEngine?.id == engine.id) {
+                        SelectionSearchEngineConfig.selectEngine(context, engines.first().id)
+                    }
+                }
+                onEnginesChanged()
+            }
             .show()
     }
 
-    private fun replaceEngine(updated: SelectionSearchEngineConfig.SearchEngine) {
-        val engines = SelectionSearchEngineConfig.engines(requireContext()).toMutableList()
-        val index = engines.indexOfFirst { it.id == updated.id }
-        if (index >= 0) engines[index] = updated else engines.add(updated)
-        SelectionSearchEngineConfig.saveEngines(requireContext(), engines)
-        if (updated.id == currentEngine?.id) {
-            loadSearch(binding.editQuery.text?.toString().orEmpty(), updated.id)
-        }
-    }
-
-    private fun replaceEngines(engines: List<SelectionSearchEngineConfig.SearchEngine>) {
-        SelectionSearchEngineConfig.saveEngines(requireContext(), engines)
-        loadSearch(binding.editQuery.text?.toString().orEmpty(), currentEngine?.id.orEmpty())
-    }
-
-    private fun showEditEngineDialog(
-        engine: SelectionSearchEngineConfig.SearchEngine?,
-        onSave: (SelectionSearchEngineConfig.SearchEngine) -> Unit
-    ) {
+    private fun showEditEngineDialog(engine: SelectionSearchEngineConfig.SearchEngine?) {
         val context = requireContext()
         val layout = LinearLayout(context).apply {
             orientation = LinearLayout.VERTICAL
@@ -303,24 +401,50 @@ class SelectionWebSearchDialog() : BottomSheetDialogFragment(R.layout.dialog_sel
             setText(engine?.url.orEmpty())
             setSingleLine()
         }
+        val editCss = EditText(context).apply {
+            hint = context.getString(R.string.selection_search_engine_hide_css_hint)
+            gravity = Gravity.TOP or Gravity.START
+            setText(engine?.hideCss.orEmpty())
+            setTextSize(13f)
+            minLines = 2
+            maxLines = 6
+            setHorizontallyScrolling(false)
+            setSingleLine(false)
+        }
         layout.addView(editName)
         layout.addView(editUrl)
+        layout.addView(editCss)
         AlertDialog.Builder(context)
-            .setTitle(R.string.selection_search_engine_title)
+            .setTitle(if (engine == null) R.string.add else R.string.edit)
             .setView(layout)
             .setNegativeButton(R.string.cancel, null)
             .setPositiveButton(R.string.ok) { _, _ ->
                 val name = editName.text?.toString().orEmpty().trim()
                 val url = editUrl.text?.toString().orEmpty().trim()
-                if (name.isBlank() || url.isBlank()) return@setPositiveButton
-                onSave(
-                    SelectionSearchEngineConfig.SearchEngine(
-                        id = engine?.id?.takeIf { it.isNotBlank() } ?: "custom_${System.currentTimeMillis()}",
-                        name = name,
-                        url = url,
-                        hideCss = engine?.hideCss
-                    )
+                val css = editCss.text?.toString().orEmpty().trim()
+                if (name.isBlank() || url.isBlank()) {
+                    context.toastOnUi(R.string.cannot_empty)
+                    return@setPositiveButton
+                }
+                if (!url.startsWith("http://", true) && !url.startsWith("https://", true)) {
+                    context.toastOnUi(R.string.selection_search_engine_url_error)
+                    return@setPositiveButton
+                }
+                val edited = SelectionSearchEngineConfig.SearchEngine(
+                    id = engine?.id?.takeIf { it.isNotBlank() }
+                        ?: "engine_${System.currentTimeMillis()}",
+                    name = name,
+                    url = url,
+                    hideCss = css
                 )
+                val engines = SelectionSearchEngineConfig.engines(context).toMutableList()
+                val index = engines.indexOfFirst { it.id == edited.id }
+                if (index >= 0) engines[index] = edited else engines.add(edited)
+                SelectionSearchEngineConfig.saveEngines(context, engines)
+                if (edited.id == currentEngine?.id) {
+                    loadSearch(binding.editQuery.text?.toString().orEmpty(), edited.id)
+                }
+                onEnginesChanged()
             }
             .show()
     }

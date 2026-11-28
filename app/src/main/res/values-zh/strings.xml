@@ -795,6 +795,9 @@
     <string name="theme_list_summary">使用、保存、导入或分享主题</string>
     <string name="select_theme">切换默认主题</string>
     <string name="sort_by_lastUpdateTime">更新时间排序</string>
+    <string name="selection_search_engine_hide_css_enabled">已启用 CSS 屏蔽</string>
+    <string name="selection_search_engine_hide_css_hint">CSS 屏蔽样式，可留空。例：header, form[role=&quot;search&quot;] { display:none!important; }</string>
+    <string name="selection_search_engine_url_error">搜索地址必须以 http:// 或 https:// 开头</string>
     <string name="selection_search_engine_title">搜索引擎</string>
     <string name="selection_search_engine_name">搜索引擎名称</string>
     <string name="selection_search_engine_url">搜索地址（{query} 代表关键词）</string>

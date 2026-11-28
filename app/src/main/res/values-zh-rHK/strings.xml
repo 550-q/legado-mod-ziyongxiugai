@@ -784,6 +784,9 @@
     <string name="select_theme">切換默認主題</string>
     <string name="share_selected_source">分享選中源</string>
     <string name="sort_by_lastUpdateTime">更新時間排序</string>
+    <string name="selection_search_engine_hide_css_enabled">已啟用 CSS 屏蔽</string>
+    <string name="selection_search_engine_hide_css_hint">CSS 屏蔽樣式，可留空。例：header, form[role=&quot;search&quot;] { display:none!important; }</string>
+    <string name="selection_search_engine_url_error">搜尋地址必須以 http:// 或 https:// 開頭</string>
     <string name="selection_search_engine_title">搜尋引擎</string>
     <string name="selection_search_engine_name">搜尋引擎名稱</string>
     <string name="selection_search_engine_url">搜尋地址（{query} 代表關鍵詞）</string>

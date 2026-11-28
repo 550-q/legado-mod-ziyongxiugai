@@ -799,6 +799,9 @@
     <string name="select_theme">Switch default theme</string>
     <string name="sort_by_lastUpdateTime">Sort by update time</string>
     <string name="sort_by_respondTime">Sort by respond time</string>
+    <string name="selection_search_engine_hide_css_enabled">CSS blocker enabled</string>
+    <string name="selection_search_engine_hide_css_hint">CSS blocker, optional. Example: header, form[role=&quot;search&quot;] { display:none!important; }</string>
+    <string name="selection_search_engine_url_error">Search URL must start with http:// or https://</string>
     <string name="selection_search_engine_title">Search engine</string>
     <string name="selection_search_engine_name">Search engine name</string>
     <string name="selection_search_engine_url">Search URL (use {query} for the keyword)</string>
