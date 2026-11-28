@@ -273,6 +273,11 @@ class ReadView(context: Context, attrs: AttributeSet) :
         return true
     }
 
+    /** 回到前台后补做因状态栏显隐跳过的分页 */
+    fun formatIfPendingOnResume() {
+        curPage.formatIfPendingOnResume()
+    }
+
     fun cancelSelect(clearSearchResult: Boolean = false) {
         dismissSelectionMagnifier()
         if (isTextSelected) {

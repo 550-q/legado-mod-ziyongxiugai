@@ -92,10 +92,28 @@ class ContentTextView(context: Context, attrs: AttributeSet?) : View(context, at
         }
     }
 
+    private var pendingFormatOnResume = false
+
     override fun onSizeChanged(w: Int, h: Int, oldw: Int, oldh: Int) {
         super.onSizeChanged(w, h, oldw, oldh)
         if (!isMainView) return
+        // 窗口失焦时（跳外部应用弹「选择应用」、系统对话框盖上来）状态栏显隐会改变可用高度，
+        // 这时立刻重新分页会让正文整页跳动；先记下来，等回到阅读界面再排版
+        val hostActivity = context as? android.app.Activity
+        if (hostActivity != null && !hostActivity.window.decorView.hasWindowFocus()) {
+            pendingFormatOnResume = true
+            return
+        }
         ChapterProvider.upViewSize(w, h)
+        textPage.format()
+    }
+
+    /** 回到前台后补做失焦期间跳过的分页 */
+    fun formatIfPendingOnResume() {
+        if (!pendingFormatOnResume) return
+        pendingFormatOnResume = false
+        if (width <= 0 || height <= 0) return
+        ChapterProvider.upViewSize(width, height)
         textPage.format()
     }
 

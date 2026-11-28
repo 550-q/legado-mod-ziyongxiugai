@@ -332,6 +332,9 @@ class ReadBookActivity : BaseReadBookActivity(),
         super.onWindowFocusChanged(hasFocus)
         if (hasFocus) {
             upSystemUiVisibility()
+            // 补做失焦期间跳过的分页，再按出发前的位置校正页码
+            binding.readView.formatIfPendingOnResume()
+            restorePageAfterExternalLaunch(clearSnapshot = true)
             binding.readMenu.upBrightnessState()
         } else if (!menuLayoutIsVisible) {
             // 失焦时（弹系统对话框、跳外部应用）不再动系统栏，避免正文跟着复排
@@ -393,25 +396,29 @@ class ReadBookActivity : BaseReadBookActivity(),
         super.startActivity(intent)
     }
 
-    private fun restorePageAfterExternalLaunch() {
+    private fun restorePageAfterExternalLaunch(clearSnapshot: Boolean = false) {
         val snapshot = externalLaunchPageSnapshot ?: return
-        externalLaunchPageSnapshot = null
-        if (bookChanged) return
-        val now = currentReadPageSnapshot() ?: return
-        if (now.chapterIndex == snapshot.chapterIndex && now.chapterPos == snapshot.chapterPos) {
+        if (bookChanged) {
+            externalLaunchPageSnapshot = null
             return
         }
-        val book = ReadBook.book ?: return
-        ReadBook.setProgress(
-            BookProgress(
-                name = book.name,
-                author = book.author,
-                durChapterIndex = snapshot.chapterIndex,
-                durChapterPos = snapshot.chapterPos,
-                durChapterTime = System.currentTimeMillis(),
-                durChapterTitle = snapshot.chapterTitle
+        val now = currentReadPageSnapshot()
+        if (now != null &&
+            (now.chapterIndex != snapshot.chapterIndex || now.chapterPos != snapshot.chapterPos)
+        ) {
+            val book = ReadBook.book ?: return
+            ReadBook.setProgress(
+                BookProgress(
+                    name = book.name,
+                    author = book.author,
+                    durChapterIndex = snapshot.chapterIndex,
+                    durChapterPos = snapshot.chapterPos,
+                    durChapterTime = System.currentTimeMillis(),
+                    durChapterTitle = snapshot.chapterTitle
+                )
             )
-        )
+        }
+        if (clearSnapshot) externalLaunchPageSnapshot = null
     }
 
     override fun onPause() {

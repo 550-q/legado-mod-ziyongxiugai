@@ -491,6 +491,10 @@ class PageView(context: Context) : FrameLayout(context) {
         binding.contentTextView.resetReverseCursor()
     }
 
+    fun formatIfPendingOnResume() {
+        binding.contentTextView.formatIfPendingOnResume()
+    }
+
     fun cancelSelect(clearSearchResult: Boolean = false) {
         binding.contentTextView.cancelSelect(clearSearchResult)
     }
