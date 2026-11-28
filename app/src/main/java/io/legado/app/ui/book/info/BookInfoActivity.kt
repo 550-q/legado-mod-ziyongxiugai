@@ -78,6 +78,8 @@ import io.legado.app.ui.book.search.SearchActivity
 import io.legado.app.model.SourceCallBack
 import io.legado.app.ui.association.OnLineImportActivity
 import io.legado.app.ui.book.source.edit.BookSourceEditActivity
+import io.legado.app.model.JumpHistoryStore
+import io.legado.app.model.ReadJumpRecord
 import io.legado.app.ui.book.toc.TocActivityResult
 import io.legado.app.ui.file.HandleFileContract
 import io.legado.app.ui.login.SourceLoginActivity
@@ -125,6 +127,24 @@ class BookInfoActivity :
         it?.let {
             viewModel.getBook(false)?.let { book ->
                 lifecycleScope.launch {
+                    val durChapterIndex = it[0] as Int
+                    val oldChapterIndex = book.durChapterIndex
+                    val oldChapterPos = book.durChapterPos
+                    // 书籍详情目录里选章也算一次跳转，先把跳转前的进度记到跳转历史
+                    if (oldChapterIndex >= 0 &&
+                        (oldChapterIndex != durChapterIndex || oldChapterPos != (it[1] as Int))
+                    ) {
+                        JumpHistoryStore.addPending(
+                            ReadJumpRecord(
+                                bookUrl = book.bookUrl,
+                                chapterIndex = oldChapterIndex,
+                                chapterPos = oldChapterPos,
+                                chapterTitle = book.durChapterTitle.orEmpty(),
+                                recordTime = System.currentTimeMillis(),
+                                chapterCount = viewModel.chapterListData.value?.size ?: 0
+                            )
+                        )
+                    }
                     withContext(IO) {
                         val durChapterIndex = it[0] as Int
                         val durChapterPos = it[1] as Int

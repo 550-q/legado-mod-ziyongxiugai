@@ -121,6 +121,8 @@ object ReadBook : CoroutineScope by MainScope() {
         callBack?.upPageAnim()
         upWebBook(book)
         jumpHistory.clear()
+        // 书籍详情目录里选章跳转前记录的位置，在阅读界面启动后并入
+        jumpHistory.addAll(JumpHistoryStore.takePending(book.bookUrl))
         webBookProgress = null
         TextFile.clear()
         synchronized(this) {
@@ -294,6 +296,7 @@ object ReadBook : CoroutineScope by MainScope() {
     /** 退出书架时清空全部跳转记录 */
     fun clearJumpHistory() {
         jumpHistory.clear()
+        JumpHistoryStore.clear()
     }
 
     /** 恢复到选中的跳转记录 */

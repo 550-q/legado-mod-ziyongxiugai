@@ -256,7 +256,11 @@ class TextActionMenu(private val context: Context, private val callBack: CallBac
                         true
                     }
 
-                    else -> false
+                    else -> callBack.onMenuLongClick(
+                        getItem(holder.layoutPosition)?.itemId ?: 0
+                    ).also { handled ->
+                        if (handled) callBack.onMenuActionFinally()
+                    }
                 }
             }
         }
@@ -341,6 +345,9 @@ class TextActionMenu(private val context: Context, private val callBack: CallBac
         val selectedText: String
 
         fun onMenuItemSelected(itemId: Int): Boolean
+
+        /** 长按菜单项，返回 true 表示已处理 */
+        fun onMenuLongClick(itemId: Int): Boolean
 
         fun onMenuActionFinally()
     }

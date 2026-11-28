@@ -923,6 +923,20 @@ class ReadBookActivity : BaseReadBookActivity(),
     }
 
     /**
+     * 长按菜单项：长按「全文搜索」弹出网页搜索窗口
+     */
+    override fun onMenuLongClick(itemId: Int): Boolean {
+        if (itemId == R.id.menu_search_content) {
+            val text = selectedText.trim()
+            if (text.isNotEmpty()) {
+                showDialogFragment(SelectionWebSearchDialog(text))
+            }
+            return true
+        }
+        return false
+    }
+
+    /**
      * 文本选择菜单操作完成
      */
     override fun onMenuActionFinally() = binding.run {
