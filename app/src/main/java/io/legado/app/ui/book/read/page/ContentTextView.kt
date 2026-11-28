@@ -40,6 +40,12 @@ import kotlin.math.min
  * 阅读内容视图
  */
 class ContentTextView(context: Context, attrs: AttributeSet?) : View(context, attrs) {
+
+    companion object {
+        /** 阅读界面暂停期间暂停重新分页，避免状态栏显隐导致正文跳页 */
+        @JvmStatic
+        var suspendFormat = false
+    }
     var selectAble = AppConfig.textSelectAble
     val selectedPaint by lazy {
         Paint().apply {
@@ -97,10 +103,9 @@ class ContentTextView(context: Context, attrs: AttributeSet?) : View(context, at
     override fun onSizeChanged(w: Int, h: Int, oldw: Int, oldh: Int) {
         super.onSizeChanged(w, h, oldw, oldh)
         if (!isMainView) return
-        // 窗口失焦时（跳外部应用弹「选择应用」、系统对话框盖上来）状态栏显隐会改变可用高度，
+        // 阅读界面暂停期间（跳外部应用弹「选择应用」、系统对话框盖上来）状态栏显隐会改变可用高度，
         // 这时立刻重新分页会让正文整页跳动；先记下来，等回到阅读界面再排版
-        val hostActivity = context as? android.app.Activity
-        if (hostActivity != null && !hostActivity.window.decorView.hasWindowFocus()) {
+        if (suspendFormat) {
             pendingFormatOnResume = true
             return
         }
@@ -123,7 +128,8 @@ class ContentTextView(context: Context, attrs: AttributeSet?) : View(context, at
         if (longScreenshot) {
             canvas.translate(0f, scrollY.toFloat())
         }
-        check(!visibleRect.isEmpty) { "visibleRect 为空" }
+        // 分页被推迟时 visibleRect 可能还没算出来，这一帧先不画，等回到前台补排版后再画
+        if (visibleRect.isEmpty) return
         canvas.clipRect(visibleRect)
         drawPage(canvas)
     }

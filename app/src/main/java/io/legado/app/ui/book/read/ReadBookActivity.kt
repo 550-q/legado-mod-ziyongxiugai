@@ -334,6 +334,7 @@ class ReadBookActivity : BaseReadBookActivity(),
             upSystemUiVisibility()
             // 补做失焦期间跳过的分页，再按出发前的位置校正页码
             binding.readView.formatIfPendingOnResume()
+            io.legado.app.ui.book.read.page.ContentTextView.suspendFormat = false
             restorePageAfterExternalLaunch(clearSnapshot = true)
             binding.readMenu.upBrightnessState()
         } else if (!menuLayoutIsVisible) {
@@ -423,6 +424,8 @@ class ReadBookActivity : BaseReadBookActivity(),
 
     override fun onPause() {
         super.onPause()
+        // 暂停期间不重新分页（返回时再补），避免系统对话框导致状态栏显隐、正文跳页
+        io.legado.app.ui.book.read.page.ContentTextView.suspendFormat = true
         autoPageStop()
         backupJob?.cancel()
         ReadBook.saveRead()
