@@ -157,6 +157,11 @@ object ReadBook : CoroutineScope by MainScope() {
         }
         callBack?.upMenuView()
         upWebBook(book)
+        // 同一本书再次进入阅读时不会走 resetData，这里也要接上详情页目录暂存的位置
+        val pending = JumpHistoryStore.takePending(book.bookUrl)
+        if (pending.isNotEmpty()) {
+            jumpHistory.addAll(pending)
+        }
         synchronized(this) {
             loadingChapters.clear()
             downloadedChapters.clear()

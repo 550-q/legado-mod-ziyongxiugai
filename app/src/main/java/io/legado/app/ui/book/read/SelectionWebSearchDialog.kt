@@ -85,18 +85,26 @@ class SelectionWebSearchDialog() : BottomSheetDialogFragment(R.layout.dialog_sel
     override fun onStart() {
         super.onStart()
         dialog?.window?.setDimAmount(0.32f)
-        dialog?.window?.setLayout(
-            ViewGroup.LayoutParams.MATCH_PARENT,
-            (resources.displayMetrics.heightPixels * 0.9f).toInt()
-        )
+        val sheetHeight = (resources.displayMetrics.heightPixels * 0.9f).toInt()
+        dialog?.window?.setLayout(ViewGroup.LayoutParams.MATCH_PARENT, sheetHeight)
         val sheet = dialog?.findViewById<View>(com.google.android.material.R.id.design_bottom_sheet)
         if (sheet != null) {
             sheet.setBackgroundColor(Color.TRANSPARENT)
-            BottomSheetBehavior.from(sheet).apply {
-                state = BottomSheetBehavior.STATE_EXPANDED
+            // BottomSheet 自身高度必须显式给足，否则首次弹出会按内容高度折叠成一条
+            sheet.layoutParams = sheet.layoutParams.apply {
+                this.height = sheetHeight
+                this.width = ViewGroup.LayoutParams.MATCH_PARENT
+            }
+            val behavior = BottomSheetBehavior.from(sheet).apply {
                 skipCollapsed = true
                 isHideable = true
-                peekHeight = (resources.displayMetrics.heightPixels * 0.9f).toInt()
+                peekHeight = sheetHeight
+            }
+            // 等布局完成再展开，首次弹出也按全高显示
+            sheet.post {
+                if (isAdded) {
+                    behavior.state = BottomSheetBehavior.STATE_EXPANDED
+                }
             }
         }
     }
@@ -328,11 +336,12 @@ class SelectionWebSearchDialog() : BottomSheetDialogFragment(R.layout.dialog_sel
                 gravity = Gravity.CENTER
                 maxLines = 1
                 includeFontPadding = false
-                setTextColor(if (selected) context.primaryColor else context.secondaryTextColor)
+                isFocusable = false
+                setTextColor(if (selected) context.accentColor else context.secondaryTextColor)
                 background = GradientDrawable().apply {
                     cornerRadius = 16f.dpToPx()
                     setColor(
-                        if (selected) context.primaryColor and 0x33FFFFFF.toInt()
+                        if (selected) context.accentColor and 0x33FFFFFF.toInt()
                         else context.secondaryTextColor and 0x1AFFFFFF.toInt()
                     )
                 }
@@ -349,6 +358,9 @@ class SelectionWebSearchDialog() : BottomSheetDialogFragment(R.layout.dialog_sel
                 }
             }
             binding.engineContainer.addView(chip)
+        }
+        binding.engineContainer.post {
+            (binding.engineContainer.parent as? android.widget.HorizontalScrollView)?.scrollTo(0, 0)
         }
     }
 
