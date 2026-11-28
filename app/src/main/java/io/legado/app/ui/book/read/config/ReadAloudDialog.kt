@@ -133,8 +133,9 @@ class ReadAloudDialog : BaseDialogFragment(R.layout.dialog_read_aloud) {
             upTtsSpeechRate()
         }
         ivTimer.setOnClickListener {
-            AppConfig.ttsTimer = seekTimer.progress
-            toastOnUi("保存设定时间成功！")
+            ReadAloud.setTimer(requireContext(), seekTimer.progress)
+            showTimerMinutes(seekTimer.progress)
+            toastOnUi(if (seekTimer.progress > 0) "设定时间成功！" else "已关闭定时")
         }
         tvTimer.setOnClickListener {
             val times = intArrayOf(0, 5, 10, 15, 30, 60, 90, 180)
@@ -142,6 +143,9 @@ class ReadAloudDialog : BaseDialogFragment(R.layout.dialog_read_aloud) {
             context?.selector("设定时间", timeKeys) { _, index ->
                 if (index < times.size) {
                     ReadAloud.setTimer(requireContext(), times[index])
+                    // 设定后立刻在右侧显示，不等服务回传
+                    binding.seekTimer.progress = times[index]
+                    showTimerMinutes(times[index])
                 } else {
                     showCustomTimerDialog()
                 }
@@ -168,6 +172,7 @@ class ReadAloudDialog : BaseDialogFragment(R.layout.dialog_read_aloud) {
 
             override fun onStopTrackingTouch(seekBar: SeekBar) {
                 ReadAloud.setTimer(requireContext(), seekTimer.progress)
+                showTimerMinutes(seekTimer.progress)
             }
         })
     }
@@ -204,6 +209,12 @@ class ReadAloudDialog : BaseDialogFragment(R.layout.dialog_read_aloud) {
                 binding.seekTimer.progress = AppConfig.ttsTimer
             }
         }
+    }
+
+    /** 设定定时后立即显示分钟数（不读服务端剩余时间） */
+    private fun showTimerMinutes(minutes: Int) {
+        binding.tvTimer.text = requireContext()
+            .getString(R.string.timer_m, minutes.coerceAtLeast(0))
     }
 
     private fun upTimerText(timeMinute: Int) {
@@ -253,7 +264,12 @@ class ReadAloudDialog : BaseDialogFragment(R.layout.dialog_read_aloud) {
                 AppConfig.ttsTimerBySecond = bySecond
                 AppConfig.ttsTimer = (seconds + 59) / 60
                 ReadAloud.setTimerSeconds(ctx, seconds, bySecond)
-                upTimerText(BaseReadAloudService.timeMinute)
+                if (bySecond) {
+                    binding.tvTimer.text = getString(R.string.timer_s, seconds)
+                } else {
+                    binding.seekTimer.progress = (seconds + 59) / 60
+                    showTimerMinutes((seconds + 59) / 60)
+                }
             }
             cancelButton()
         }

@@ -923,10 +923,10 @@ class ReadBookActivity : BaseReadBookActivity(),
     }
 
     /**
-     * 长按菜单项：长按「全文搜索」弹出网页搜索窗口
+     * 长按菜单项：长按「浏览器」弹出网页搜索窗口
      */
     override fun onMenuLongClick(itemId: Int): Boolean {
-        if (itemId == R.id.menu_search_content) {
+        if (itemId == R.id.menu_browser) {
             val text = selectedText.trim()
             if (text.isNotEmpty()) {
                 showDialogFragment(SelectionWebSearchDialog(text))

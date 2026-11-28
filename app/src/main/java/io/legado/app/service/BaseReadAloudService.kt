@@ -169,7 +169,8 @@ abstract class BaseReadAloudService : BaseService(),
         initBroadcastReceiver()
         initPhoneStateListener()
         upMediaSessionPlaybackState(PlaybackStateCompat.STATE_PLAYING)
-        restoreSavedTimer()
+        // 每次开始朗读都默认不定时，定时只在本次朗读内有效
+        clearSavedTimer()
         execute {
             ImageLoader
                 .loadBitmap(this@BaseReadAloudService, ReadBook.book?.getDisplayCover())
@@ -208,6 +209,8 @@ abstract class BaseReadAloudService : BaseService(),
         }
         isRun = false
         pause = true
+        // 手动停止播放后不再保留定时
+        clearSavedTimer()
         abandonFocus()
         unregisterReceiver(broadcastReceiver)
         postEvent(EventBus.ALOUD_STATE, Status.STOP)
@@ -419,32 +422,24 @@ abstract class BaseReadAloudService : BaseService(),
     }
 
     /**
-     * 应用定时设置并写入配置，下次开始朗读时仍然生效
+     * 应用本次朗读的定时；不写回配置，定时只生效一次
      */
     private fun applyTimer(seconds: Int, bySecond: Boolean) {
         timerRemainSeconds = seconds.coerceAtLeast(0)
-        if (timerRemainSeconds > 0) {
-            timerBySecond = bySecond
-            AppConfig.ttsTimerSeconds = timerRemainSeconds
-            AppConfig.ttsTimerBySecond = bySecond
-            AppConfig.ttsTimer = (timerRemainSeconds + 59) / 60
-        } else {
-            AppConfig.ttsTimerSeconds = 0
-            AppConfig.ttsTimer = 0
+        timerBySecond = bySecond && timerRemainSeconds > 0
+        if (timerRemainSeconds <= 0) {
+            clearSavedTimer()
         }
         doDs()
     }
 
-    /**
-     * 开始朗读时恢复上次保存的定时
-     */
-    private fun restoreSavedTimer() {
-        val savedSeconds = AppConfig.ttsTimerSeconds.takeIf { it > 0 }
-            ?: (AppConfig.ttsTimer * 60).takeIf { it > 0 }
-            ?: return
-        val bySecond = AppConfig.ttsTimerBySecond && AppConfig.ttsTimerSeconds > 0
-        applyTimer(savedSeconds, bySecond)
-        toastOnUi("朗读定时 " + formatTimerText(savedSeconds, bySecond))
+    /** 本次朗读结束（停止 / 定时到点）后清掉定时，下次朗读重新从不定时开始 */
+    private fun clearSavedTimer() {
+        timerRemainSeconds = 0
+        timerBySecond = false
+        AppConfig.ttsTimer = 0
+        AppConfig.ttsTimerSeconds = 0
+        AppConfig.ttsTimerBySecond = false
     }
 
     private fun formatTimerText(seconds: Int, bySecond: Boolean): String {
@@ -467,7 +462,7 @@ abstract class BaseReadAloudService : BaseService(),
      * 定时到点：按设置暂停朗读，否则停止朗读
      */
     private fun finishTimer() {
-        timerRemainSeconds = 0
+        clearSavedTimer()
         postEvent(EventBus.READ_ALOUD_DS, 0)
         if (AppConfig.pauseReadAloudAfterTimer) {
             pauseReadAloud()
