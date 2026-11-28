@@ -330,10 +330,11 @@ class ReadBookActivity : BaseReadBookActivity(),
 
     override fun onWindowFocusChanged(hasFocus: Boolean) {
         super.onWindowFocusChanged(hasFocus)
-        upSystemUiVisibility()
         if (hasFocus) {
+            upSystemUiVisibility()
             binding.readMenu.upBrightnessState()
         } else if (!menuLayoutIsVisible) {
+            // 失焦时（弹系统对话框、跳外部应用）不再动系统栏，避免正文跟着复排
             ReadBook.cancelPreDownloadTask()
         }
     }
@@ -378,6 +379,39 @@ class ReadBookActivity : BaseReadBookActivity(),
                 ReadBook.syncProgress({ progress -> sureNewProgress(progress) })
             }
         }
+        restorePageAfterExternalLaunch()
+    }
+
+    /**
+     * 跳去外部应用（浏览器、分享、系统「选择应用」等）前后，阅读页会短暂复排导致页码漂移，
+     * 回来时按出发前的页码位置还原。
+     */
+    override fun startActivity(intent: Intent?) {
+        if (intent != null && !isFinishing && !isDestroyed) {
+            externalLaunchPageSnapshot = currentReadPageSnapshot()
+        }
+        super.startActivity(intent)
+    }
+
+    private fun restorePageAfterExternalLaunch() {
+        val snapshot = externalLaunchPageSnapshot ?: return
+        externalLaunchPageSnapshot = null
+        if (bookChanged) return
+        val now = currentReadPageSnapshot() ?: return
+        if (now.chapterIndex == snapshot.chapterIndex && now.chapterPos == snapshot.chapterPos) {
+            return
+        }
+        val book = ReadBook.book ?: return
+        ReadBook.setProgress(
+            BookProgress(
+                name = book.name,
+                author = book.author,
+                durChapterIndex = snapshot.chapterIndex,
+                durChapterPos = snapshot.chapterPos,
+                durChapterTime = System.currentTimeMillis(),
+                durChapterTitle = snapshot.chapterTitle
+            )
+        )
     }
 
     override fun onPause() {
@@ -916,6 +950,26 @@ class ReadBookActivity : BaseReadBookActivity(),
 
             R.id.menu_dict -> {
                 showDialogFragment(DictDialog(selectedText))
+                return true
+            }
+
+            R.id.menu_browser -> {
+                val text = selectedText
+                // 先收起选择菜单、取消选中，再跳外部应用；菜单还挂着时被系统接管会让正文复排跳页
+                binding.readView.post {
+                    runCatching {
+                        val intent = if (text.isAbsUrl()) {
+                            Intent(Intent.ACTION_VIEW, android.net.Uri.parse(text))
+                        } else {
+                            Intent(Intent.ACTION_WEB_SEARCH).apply {
+                                putExtra(android.app.SearchManager.QUERY, text)
+                            }
+                        }
+                        startActivity(intent)
+                    }.onFailure {
+                        toastOnUi(it.localizedMessage ?: "ERROR")
+                    }
+                }
                 return true
             }
         }
@@ -1856,6 +1910,9 @@ class ReadBookActivity : BaseReadBookActivity(),
 
     // 更换书籍等内部流程直接 finish，不弹跳转记录
     private var skipJumpHistoryPrompt = false
+
+    /** 跳外部应用前的阅读页快照，用于回来时还原页码 */
+    private var externalLaunchPageSnapshot: ReadPageSnapshot? = null
 
     override fun finish() {
         if (!skipJumpHistoryPrompt && !isFinishing && !isDestroyed && ReadBook.hasJumpHistory()) {
